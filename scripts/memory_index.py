@@ -17,6 +17,9 @@
   * Самолечение: если сессия дописала строку в MEMORY.md руками (так велит сам Claude Code),
     строка не теряется — её текст переносится в index_line файла, на который она ссылается,
     а строка без ссылки на файл — в раздел «Входящие» шапки.
+    Ручной считается только строка, которой не было в прошлой сборке (снимок .index-emitted.json):
+    иначе исправленная в файле index_line откатывалась бы к старой строке оглавления.
+  * Две сборки одной папки сразу не идут: вторая ждёт замок .index-lock, не дождалась — пропускает.
 
 Запуск:
   python memory_index.py <папка memory>      # одна папка
@@ -54,6 +57,10 @@ MARK = "<!-- СОБРАНО memory_index.py — руками не править
 LINK_RE = re.compile(r"\]\(([^)\s]+\.md)\)")
 HEAD_END = "<!-- КОНЕЦ ШАПКИ: ниже собранные строки -->"
 HEAD_STATE = ".head-emitted"            # снимок шапки на момент прошлой сборки
+LINES_STATE = ".index-emitted.json"     # снимок собранных строк: {файл: {line, moment}}
+LOCK = ".index-lock"
+LOCK_WAIT = 10                          # сколько секунд ждать чужую сборку
+LOCK_STALE = 120                        # замок старше — остался от упавшей сборки
 
 
 # ---------- файлы правил и их шапки ----------
@@ -152,11 +159,52 @@ def set_meta(path, updates):
     new = nl.join(lines)
     if new != txt:
         st = os.stat(path)
-        tmp = path + ".tmp"
-        with open(tmp, "wb") as fh:
-            fh.write(new.encode("utf-8"))
-        os.replace(tmp, path)
+        write_atomic(path, new)
         os.utime(path, (st.st_atime, st.st_mtime))   # служебная правка — не «свежее правило»
+
+
+def write_atomic(path, text):
+    tmp = f"{path}.{os.getpid()}.tmp"     # своё имя у каждого процесса: две сборки не делят временный файл
+    with open(tmp, "wb") as fh:
+        fh.write(text.encode("utf-8"))
+    os.replace(tmp, path)
+
+
+def take_lock(mem):
+    """Замок на папку памяти. True — взяли; False — другая сборка так и не закончилась."""
+    path = os.path.join(mem, LOCK)
+    deadline = time.time() + LOCK_WAIT
+    while True:
+        try:
+            os.close(os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY))
+            return True
+        except FileExistsError:
+            try:
+                if time.time() - os.path.getmtime(path) > LOCK_STALE:
+                    os.remove(path)
+                    continue
+            except OSError:
+                continue
+            if time.time() > deadline:
+                return False
+            time.sleep(0.2)
+
+
+def drop_lock(mem):
+    try:
+        os.remove(os.path.join(mem, LOCK))
+    except OSError:
+        pass
+
+
+def load_emitted(mem):
+    """Строки прошлой сборки или None, если снимка ещё нет (первая сборка после обновления)."""
+    try:
+        with open(os.path.join(mem, LINES_STATE), encoding="utf-8") as fh:
+            data = json.load(fh)
+        return data if isinstance(data, dict) else None
+    except Exception:
+        return None
 
 
 # ---------- разбор текущего MEMORY.md (самолечение) ----------
@@ -257,8 +305,7 @@ def add_to_head(mem, head, items):
         if s not in (l.strip() for l in tgt):
             tgt.append(s)
     head = join_head(pre, secs)
-    with open(os.path.join(mem, "MEMORY.head.md"), "wb") as fh:
-        fh.write(head.encode("utf-8"))
+    write_atomic(os.path.join(mem, "MEMORY.head.md"), head)
     return head
 
 
@@ -273,11 +320,25 @@ def score(m, path, now):
         seen = 0
     fresh = (now - os.path.getmtime(path)) < RECENT_DAYS * 86400
     always = (m.get("moment") or "") == "Всегда"      # раздел «Всегда» виден всегда, по замыслу
-    return (1000 if pin or always else 0) + (100 if st != "проба" else 0) + min(seen, 5) * 4 + (150 if fresh else 0)   # новое видно 2 недели
+    rule = st != "проба"
+    proven = rule and seen >= 2                       # подтверждённое повтором свежая проба не вытесняет
+    return ((1000 if pin or always else 0) + (100 if rule else 0) + (200 if proven else 0)
+            + min(seen, 5) * 4 + (150 if fresh else 0))   # новое видно 2 недели
 
 
 def build(mem, dry=False, quiet=False):
     mem = os.path.abspath(mem)
+    if dry:
+        return _build(mem, dry, quiet)
+    if not take_lock(mem):
+        return 0, ("" if quiet else f"{mem}: идёт другая сборка, пропуск")
+    try:
+        return _build(mem, dry, quiet)
+    finally:
+        drop_lock(mem)
+
+
+def _build(mem, dry, quiet):
     rules = set(rule_files(mem))
     head = load_head(mem)
     if head is None:
@@ -301,16 +362,36 @@ def build(mem, dry=False, quiet=False):
         t = texts.setdefault(e["files"][0], [])
         if e["text"] not in t:
             t.append(e["text"])
+    emitted = load_emitted(mem)
+    index_path = os.path.join(mem, "MEMORY.md")
+    index_mtime = os.path.getmtime(index_path) if os.path.exists(index_path) else 0
+
+    def newer(f):                       # снимка нет: файл правили позже оглавления — прав файл
+        return os.path.getmtime(os.path.join(mem, f)) > index_mtime
+
+    def ours(f, text):                  # строку положила прошлая сборка, а не человек
+        if emitted is not None:
+            return (emitted.get(f) or {}).get("line") == text
+        return bool(metas[f].get("index_line")) and newer(f)
+
     for e in entries:
         primary, others = e["files"][0], e["files"][1:]
         m = metas[primary]
         upd = {}
-        text = " · ".join(texts[primary])
-        if m.get("index_line") != text:
-            upd["index_line"] = text
+        hand = [t for t in texts[primary] if not ours(primary, t)]
+        if hand:                        # источник правды — файл; из оглавления берём только дописанное руками
+            kept = [m["index_line"]] if len(hand) < len(texts[primary]) and m.get("index_line") else []
+            text = " · ".join(kept + [t for t in hand if t not in kept])
+            if m.get("index_line") != text:
+                upd["index_line"] = text
         if m.get("index_via"):          # был соседом в чужой строке, теперь у него своя
             upd["index_via"] = ""
-        if m.get("moment") != e["moment"] and (not m.get("moment") or e["moment"] != "Разное"):
+        if emitted is not None and primary in emitted:
+            moved = emitted[primary].get("moment") != e["moment"]      # строку перенесли в другой раздел руками
+        else:
+            moved = not newer(primary)
+        if (hand or moved or not m.get("moment")) and m.get("moment") != e["moment"] \
+                and (not m.get("moment") or e["moment"] != "Разное"):
             upd["moment"] = e["moment"]
         if upd:
             if not dry:
@@ -399,11 +480,11 @@ def build(mem, dry=False, quiet=False):
             p = os.path.join(mem, name)
             old = read(p) if os.path.exists(p) else None
             if old != body:
-                with open(p + ".tmp", "wb") as fh:
-                    fh.write(body.encode("utf-8"))
-                os.replace(p + ".tmp", p)
-        with open(os.path.join(mem, HEAD_STATE), "wb") as fh:
-            fh.write(head.replace("\r\n", "\n").encode("utf-8"))
+                write_atomic(p, body)
+        write_atomic(os.path.join(mem, HEAD_STATE), head.replace("\r\n", "\n"))
+        write_atomic(os.path.join(mem, LINES_STATE), json.dumps(
+            {c["file"]: {"line": c["line"][2:].strip(), "moment": c["moment"]} for c in chosen},
+            ensure_ascii=False, indent=0, sort_keys=True))
     size = len(memory_md)
     msg = (f"{os.path.basename(os.path.dirname(mem))}/{os.path.basename(mem)}: оглавление {size} знаков / {memory_md.count(chr(10))} строк, "
            f"показано {len(chosen)}, в каталоге {len(left)}, через соседа {len(via)}, всего файлов {len(rules)}")
