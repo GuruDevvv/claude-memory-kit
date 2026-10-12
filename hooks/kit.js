@@ -35,4 +35,7 @@ function samePath(a, b) {
   return path.resolve(a).toLowerCase() === path.resolve(b).toLowerCase();
 }
 
-module.exports = { loadConfig, slug, projectMemoryDir, samePath };
+// Метка «хук старта сработал». Ту же строку ищет агент по разделу правил (install.py, HOOKCHECK).
+const HOOKS_ALIVE = 'memory-kit: хуки работают';
+
+module.exports = { loadConfig, slug, projectMemoryDir, samePath, HOOKS_ALIVE };

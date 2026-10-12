@@ -170,12 +170,13 @@ try {
     if (cfg.inject_project_index) add('Память: оглавление этого проекта', kit.projectMemoryDir(cfg, cwd));
   }
 
-  if (parts.length === 0) process.exit(0); // нечего сказать — молчим
-
+  // Метку пишем всегда: по её отсутствию агент понимает, что хуки не запускаются
+  // (в Codex — не подтверждены через /hooks), и сам говорит об этом человеку.
   console.log(JSON.stringify({
     hookSpecificOutput: {
       hookEventName: 'SessionStart',
-      additionalContext: '## Контекст проекта ' + projectName + ' (подгружено хуком начала сессии)\n\n' + parts.join('\n'),
+      additionalContext: kit.HOOKS_ALIVE + '\n\n' + (parts.length === 0 ? '' :
+        '## Контекст проекта ' + projectName + ' (подгружено хуком начала сессии)\n\n' + parts.join('\n')),
     },
   }));
 } catch (e) {

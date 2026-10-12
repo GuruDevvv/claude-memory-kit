@@ -60,6 +60,29 @@ AUTOLOAD = {
     ),
 }
 
+# Строка-метка должна совпадать с HOOKS_ALIVE в hooks/kit.js
+HOOKCHECK_HEAD = (
+    "Это правило выполняется раньше любого другого и раньше ответа на вопрос человека.\n"
+    "Найди в контексте дословную строку `memory-kit: хуки работают` (её кладёт хук начала\n"
+    "сессии). Строка есть — ничего не говори об этом и работай. Строки НЕТ — свой первый ответ\n"
+    "в сессии, каким бы коротким ни был вопрос, начни с этого предупреждения дословно\n"
+    "и только потом отвечай по делу:\n\n"
+)
+HOOKCHECK = {
+    "claude": HOOKCHECK_HEAD + (
+        "> ⚠️ Память memory-kit не подключена: хуки не сработали. Разреши мне проверить настройки\n"
+        "> хуков в `settings.json`, потом открой новую сессию.\n\n"
+        "Получив согласие, проверь, что хуки memory-kit прописаны в `settings.json` и что `node`\n"
+        "запускается. Одного раза за сессию достаточно; в следующей сессии проверь заново."
+    ),
+    "codex": HOOKCHECK_HEAD + (
+        "> ⚠️ Память memory-kit не подключена: Codex не запускает хуки, пока им не доверили.\n"
+        "> Набери `/hooks`, подтверди хуки memory-kit и открой новую сессию.\n\n"
+        "Сам подтвердить хуки ты не можешь, это делает только человек. Одного раза за сессию\n"
+        "достаточно; в следующей сессии проверь заново."
+    ),
+}
+
 
 def say(text=""):
     print(text)
@@ -387,7 +410,7 @@ def install(args):
             codex_writable_note(doer, tool_dir, [memory_home] + ([projects_dir] if "claude" in tools else []))
         root_rules = os.path.join(root, spec["rules"])
         values = {"CENTRAL": fwd(central), "PROJECTS_DIR": fwd(projects_dir), "ROOT": fwd(root),
-                  "ROOT_RULES": fwd(root_rules), "AUTOLOAD": AUTOLOAD[tool], "ZOMBIES": zombies_text(tool_dir)}
+                  "ROOT_RULES": fwd(root_rules), "AUTOLOAD": AUTOLOAD[tool], "HOOKCHECK": HOOKCHECK[tool], "ZOMBIES": zombies_text(tool_dir)}
         put_block(doer, os.path.join(tool_dir, spec["rules"]), render("instructions.md", values), "Общие правила")
         put_block(doer, root_rules, render("root-rules.md", values), os.path.basename(root) + " — правила")
 
@@ -419,7 +442,8 @@ def install(args):
     say("  1. Проверь установку:  python install.py --root %s --check" % quote(root, "claude"))
     say("  2. Открой НОВУЮ сессию агента в папке проекта, где есть HANDOFF.md, и спроси «что у нас с проектом?»")
     if "codex" in tools:
-        say("  3. В Codex набери /hooks и подтверди новые хуки: пока им не доверили, Codex их пропускает")
+        say("  3. В Codex набери /hooks и подтверди новые хуки: пока им не доверили, Codex их пропускает.")
+        say("     Забудешь — агент сам напомнит об этом в начале сессии")
     return 0
 
 
