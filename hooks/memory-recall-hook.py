@@ -86,8 +86,11 @@ def pick(ms, group, command, dirs):
     stems = [ms.norm(x) for x in group.get("moments", [])]
     found = {(h["dir"], h["file"]) for kind in ("rule", "ref")
              for h in ms.search(group.get("query", ""), dirs, 8, kind)}
-    words = [w for w in ms.query_terms(re.sub(r"[\"'`$(){}\[\]=/\\:;,|&<>]", " ", command))
-             if len(w) >= 3 and not w.isdigit()][:12]
+    # слова самой команды (push, force, pm2, restart), но не куски путей и адресов: по ним в подсказку
+    # лезло постороннее — «claude», «memory», имя папки (живая проба 12.10.2026)
+    plain = " ".join(t for t in re.split(r"\s+", command) if not re.search(r"[/\\.:@~$]", t))
+    words = [w for w in ms.query_terms(re.sub(r"[\"'`(){}\[\]=;,|&<>]", " ", plain))
+             if len(w) >= 3 and not w.isdigit()][:8]
     out = []
     for mem in dirs:
         for kind, rel, _, title, text, _, m in ms.docs_of(mem):
@@ -100,7 +103,7 @@ def pick(ms, group, command, dirs):
             body = ms.norm(title + "\n" + text)
             weight = (2 if by_moment else 0) + (1 if status != "проба" else 0) + (2 if status != "проба" and seen >= 2 else 0)
             weight += {"owner": 1, "owner_ok": 1}.get((m.get("origin_kind") or "").lower(), 0)
-            weight += 1.5 * sum(1 for w in words if re.search(r"(?<![0-9a-zа-я_])" + re.escape(w), body))
+            weight += min(3, 1.5 * sum(1 for w in words if re.search(r"(?<![0-9a-zа-я_])" + re.escape(w), body)))
             out.append((-weight, rel, title, mem.replace(os.sep, "/")))
     out.sort()
     return out[:MAX_LINES]
