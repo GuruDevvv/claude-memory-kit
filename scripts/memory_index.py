@@ -15,6 +15,10 @@
     затем остальное. Очередь нужна, чтобы ни новое не вытесняло проверенное, ни наоборот:
     замер 12.10.2026 — при одной общей шкале в оглавлении было 2 проверенных правила из 52.
     Не влезшее уходит в INDEX.md — ничего не теряется.
+  * Происхождение (metadata.origin_kind) добавляет вес: слова владельца выше вывода из поломки,
+    тот выше догадки агента. Среди новых первыми идут сказанные владельцем.
+  * Проба без повтора старше 60 дней новой не считается, даже если файл недавно трогали,
+    и собирается в INDEX.md отдельным разделом «На пересмотр». Сама она не удаляется.
   * Сверка счёта: каждый файл правила обязан оказаться либо в MEMORY.md, либо в INDEX.md.
     Иначе — код возврата 2 и список потерь (однажды ручная перестройка потеряла 16 записей).
   * Самолечение: если сессия дописала строку в MEMORY.md руками (так велит сам Claude Code),
@@ -41,6 +45,9 @@ import time
 BUDGET_CHARS = 23500        # запас под лимит 25 тыс. ЗНАКОВ (замер 26.09: обрезка шла по знакам, не по байтам)
 BUDGET_LINES = 180          # запас под лимит 200 строк
 RECENT_DAYS = 14            # свежие правила получают надбавку, чтобы новое было видно хотя бы две недели
+PROBE_DAYS = 60             # проба без повтора старше этого — на пересмотр
+ORIGIN_BONUS = {"owner": 60, "owner_ok": 40, "incident": 30}     # mine и «не указано» — без надбавки
+REVIEW = "На пересмотр"
 SKIP_DIRS = {"projects", "research", "plans", "reviews", "audits", "archive", "knowledge", "user"}
 SKIP_FILES = {"MEMORY.md", "MEMORY.head.md", "INDEX.md", "PROJECT_INDEX.md"}
 
@@ -315,19 +322,34 @@ def add_to_head(mem, head, items):
 
 # ---------- сборка ----------
 
-def score(m, path, now):
+def traits(m, path, now):
+    """Признаки правила для отбора: проверено ли, новое ли, просрочена ли проба, от кого пришло."""
     st = (m.get("status") or "").lower()
-    pin = str(m.get("pin", "")).lower() in ("true", "1", "yes", "да")
     try:
         seen = int(re.sub(r"\D", "", str(m.get("seen", "0"))) or 0)
     except ValueError:
         seen = 0
-    fresh = (now - os.path.getmtime(path)) < RECENT_DAYS * 86400
-    always = (m.get("moment") or "") == "Всегда"      # раздел «Всегда» виден всегда, по замыслу
+    mtime = os.path.getmtime(path)
+    born = mtime                                      # когда случилось: origin_date, а нет его — дата файла
+    try:
+        born = time.mktime(time.strptime(str(m.get("origin_date", ""))[:10], "%Y-%m-%d"))
+    except (ValueError, OverflowError):
+        pass
     rule = st != "проба"
-    proven = rule and seen >= 2                       # подтверждённое повтором свежая проба не вытесняет
-    return ((1000 if pin or always else 0) + (100 if rule else 0) + (200 if proven else 0)
-            + min(seen, 5) * 4 + (150 if fresh else 0))   # новое видно 2 недели
+    expired = (not rule) and seen <= 1 and (now - born) > PROBE_DAYS * 86400
+    return {"rule": rule, "seen": seen, "mtime": mtime, "expired": expired,
+            "proven": rule and seen >= 2,             # подтверждённое повтором свежая проба не вытесняет
+            "fresh": (now - mtime) < RECENT_DAYS * 86400 and not expired,
+            "origin": (m.get("origin_kind") or "").lower(),
+            "top": str(m.get("pin", "")).lower() in ("true", "1", "yes", "да")
+                   or (m.get("moment") or "") == "Всегда"}      # раздел «Всегда» виден всегда, по замыслу
+
+
+def score(m, path, now):
+    t = traits(m, path, now)
+    return ((1000 if t["top"] else 0) + (100 if t["rule"] else 0) + (200 if t["proven"] else 0)
+            + min(t["seen"], 5) * 4 + (150 if t["fresh"] else 0)   # новое видно 2 недели
+            + ORIGIN_BONUS.get(t["origin"], 0))
 
 
 def ranked(cands, pos):
@@ -337,7 +359,9 @@ def ranked(cands, pos):
     top = sorted((c for c in cands if c["score"] >= 1000), key=key)
     low = [c for c in cands if c["score"] < 1000]
     proven = sorted((c for c in low if c["proven"]), key=key)
-    fresh = sorted((c for c in low if c["fresh"] and not c["proven"]), key=lambda c: (-c["mtime"], c["file"]))
+    said = lambda c: 0 if c["origin"] in ("owner", "owner_ok") else 2 if c["origin"] == "mine" else 1
+    fresh = sorted((c for c in low if c["fresh"] and not c["proven"]),
+                   key=lambda c: (said(c), -c["mtime"], c["file"]))     # сказанное владельцем — первым
     rest = sorted((c for c in low if not c["proven"] and not c["fresh"]), key=key)
     mixed = [c for pair in itertools.zip_longest(proven, fresh) for c in pair if c]
     return top + mixed + rest
@@ -433,10 +457,10 @@ def _build(mem, dry, quiet):
         line = m.get("index_line") or f"[{m.get('name') or os.path.basename(r)}]({r}) — {m.get('description', '')}".rstrip(" —")
         if f"]({r})" not in line and r not in line:
             line = f"{line} [файл]({r})"
-        sc = score(m, os.path.join(mem, r), now)
-        mtime = os.path.getmtime(os.path.join(mem, r))
-        cands.append({"file": r, "line": "- " + line, "moment": m.get("moment") or "Новое", "score": sc,
-                      "proven": sc % 1000 >= 300, "fresh": now - mtime < RECENT_DAYS * 86400, "mtime": mtime})
+        t = traits(m, os.path.join(mem, r), now)
+        cands.append({"file": r, "line": "- " + line, "moment": m.get("moment") or "Новое",
+                      "score": score(m, os.path.join(mem, r), now), "proven": t["proven"], "fresh": t["fresh"],
+                      "mtime": t["mtime"], "origin": t["origin"], "expired": t["expired"]})
 
     # 3) набор по бюджету
     head_text = head.rstrip("\n")
@@ -480,9 +504,15 @@ def _build(mem, dry, quiet):
            "Собрано memory_index.py. Полный список правил этой папки, которым не хватило места в MEMORY.md.",
            "Искать по слову: grep в папке памяти. Ничего не удалено — каждое правило лежит своим файлом.", ""]
     for sec in order:
-        items = [c for c in left if c["moment"] == sec]
+        items = [c for c in left if c["moment"] == sec and not c["expired"]]
         if items:
             idx += [f"## {sec}", ""] + [c["line"] for c in sorted(items, key=lambda c: c["file"])] + [""]
+    stale = sorted((c for c in left if c["expired"]), key=lambda c: c["file"])
+    if stale:
+        idx += [f"## {REVIEW}", "",
+                f"Пробы старше {PROBE_DAYS} дней, которые ни разу не повторились: {len(stale)}. Подтвердить "
+                "(status: правило, seen +1), объединить с похожим или убрать в архив — решает человек.", ""]
+        idx += [c["line"] for c in stale] + [""]
     index_md = "\n".join(idx) + "\n"
 
     # 5) сверка счёта

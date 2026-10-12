@@ -129,6 +129,42 @@ mi.BUDGET_CHARS = budget
 np_, nn = memory(mem).count("проверенное"), memory(mem).count("новое")
 check(f"в тесном оглавлении есть и проверенные ({np_}), и новые ({nn})", np_ >= 8 and nn >= 8 and abs(np_ - nn) <= 1)
 
+# 5в. происхождение: среди новых первым идёт сказанное владельцем; догадка агента — последней
+mem = sandbox()
+
+
+def origin_rule(name, kind):
+    p = rule(mem, name, f"[{name}](feedback/{name}.md) — строка {name} " + "х" * 60, status="проба")
+    if kind:
+        edit(p, "  moment:", f"  origin_kind: {kind}\n  moment:")
+    return p
+
+
+for i in range(6):
+    origin_rule(f"feedback_mine{i}", "mine")
+origin_rule("feedback_owner", "owner")
+BASE = len(mi.MARK) + len("# Память") + len(mi.HEAD_END) + 12      # шапка пустой песочницы
+budget, mi.BUDGET_CHARS = mi.BUDGET_CHARS, BASE + 3 * 115 + 30
+mi.build(mem)
+mi.BUDGET_CHARS = budget
+check("при нехватке места слова владельца проходят раньше догадок агента",
+      "feedback_owner" in memory(mem) and memory(mem).count("feedback_mine") < 6, memory(mem)[-400:])
+
+# 5г. просроченная проба: не новая, даже если файл трогали вчера; лежит в «На пересмотр»
+mem = sandbox()
+p = rule(mem, "feedback_stale", "[С](feedback/feedback_stale.md) — старая проба", status="проба")
+edit(p, "  moment:", "  origin_date: 2026-01-10\n  moment:")
+live = rule(mem, "feedback_live", "[Ж](feedback/feedback_live.md) — живая проба", status="проба")
+now = time.time()
+check("проба старше 60 дней без повтора новой не считается", not mi.traits(mi.meta(p), p, now)["fresh"]
+      and mi.traits(mi.meta(live), live, now)["fresh"])
+budget, mi.BUDGET_CHARS = mi.BUDGET_CHARS, BASE + 90
+mi.build(mem)
+mi.BUDGET_CHARS = budget
+index = io.open(os.path.join(mem, "INDEX.md"), encoding="utf-8").read()
+check("она собрана в каталоге под «На пересмотр», файл цел", "## На пересмотр" in index
+      and "старая проба" in index.split("## На пересмотр")[1] and os.path.exists(p), index[-300:])
+
 # 6. две сборки сразу: 8 процессов, ни одного падения, оглавление целое
 mem = sandbox()
 for i in range(40):
