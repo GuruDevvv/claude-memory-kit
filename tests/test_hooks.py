@@ -91,6 +91,45 @@ write(os.path.join(proj, "HANDOFF.md"), "# HANDOFF — Shop\nзаписка ма
 out = stop_hook(os.path.join(proj, "src"))
 check("журнал проекта не тронут, чужой свежий: напоминание есть", "Shop.md" in out, out[:300])
 
+# память в нужный момент
+def recall(mode, payload):
+    r = subprocess.run([sys.executable, os.path.join(home, ".claude", "hooks", "memory-recall-hook.py"), mode],
+                       input=json.dumps(payload), capture_output=True, text=True, encoding="utf-8",
+                       errors="replace", env=env)
+    try:
+        out = json.loads(r.stdout)["hookSpecificOutput"]
+        return out.get("additionalContext") or "ОТКАЗ: " + out["permissionDecisionReason"]
+    except Exception:
+        return ""
+
+
+write(os.path.join(central, "feedback", "feedback_commit.md"), "---\nname: c\nmetadata:\n  type: feedback\n"
+      "  status: правило\n  seen: 3\n  index_line: \"Коммитить поимённо, без add -A\"\n  moment: Когда коммичу\n---\n\nтело\n")
+write(os.path.join(central, "feedback", "feedback_ssh.md"), "---\nname: s\nmetadata:\n  type: feedback\n"
+      "  index_line: \"На сервере pm2 руками не запускать\"\n---\n\nssh и деплой: только скриптом\n")
+sid = "test-%d" % time.time()
+ctx = recall("pre", {"session_id": sid, "cwd": proj, "tool_input": {"command": "git -C . commit -m x"}})
+check("перед коммитом приходит правило про коммит", "без add -A" in ctx and "pm2" not in ctx, ctx[:300])
+check("коммит не останавливается, подсказка идёт добавкой", not ctx.startswith("ОТКАЗ"))
+check("второй коммит за сессию — без повтора",
+      recall("pre", {"session_id": sid, "cwd": proj, "tool_input": {"command": "git commit -m y"}}) == "")
+ctx = recall("pre", {"session_id": sid, "cwd": proj, "tool_input": {"command": "git push origin main"}})
+check("первый пуш за сессию остановлен, правила — причиной отказа", ctx.startswith("ОТКАЗ") and "без add -A" in ctx, ctx[:200])
+check("повтор пуша проходит",
+      recall("pre", {"session_id": sid, "cwd": proj, "tool_input": {"command": "git push origin main"}}) == "")
+ctx = recall("pre", {"session_id": sid, "cwd": proj, "tool_input": {"command": "ssh host pm2 restart app"}})
+check("первая команда на сервер остановлена; правило без раздела нашёл поиск",
+      ctx.startswith("ОТКАЗ") and "pm2 руками" in ctx, ctx[:300])
+check("чтение без подсказки", recall("pre", {"session_id": sid + "b", "cwd": proj,
+                                              "tool_input": {"command": "git status && git log -3 && ls"}}) == "")
+ctx = recall("subagent", {"session_id": sid, "cwd": os.path.join(proj, "src")})
+check("помощник получает записку проекта и команду поиска", "записка магазина" in ctx and "memory_search.py" in ctx
+      and len(ctx) <= 3000, ctx[:300])
+settings = json.load(open(os.path.join(home, ".claude", "settings.json"), encoding="utf-8"))["hooks"]
+check("хуки момента прописаны у Claude и не прописаны у Codex", "SubagentStart" in settings
+      and any("memory-recall-hook" in h["command"] for g in settings["PreToolUse"] for h in g["hooks"])
+      and "memory-recall" not in io.open(os.path.join(home, ".codex", "hooks.json"), encoding="utf-8").read())
+
 code, out = installer("--tool", "both", "--check")
 check("проверка установки проходит", code == 0, out[-600:])
 check("проверка смотрит метку и оглавление", "отдаёт метку" in out and "оглавление доходит" in out, out[-600:])

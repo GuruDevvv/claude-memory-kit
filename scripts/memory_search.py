@@ -131,7 +131,7 @@ def first_line(body):
 
 
 def docs_of(mem):
-    """Единицы поиска одной папки памяти: (вид, путь от папки, якорь, заголовок, текст, пометка)."""
+    """Единицы поиска одной папки памяти: (вид, путь от папки, якорь, заголовок, текст, пометка, шапка файла)."""
     for root, dirs, files in os.walk(mem):
         dirs[:] = [d for d in dirs if not d.startswith(".") and d != "archive"]
         rel_root = os.path.relpath(root, mem).replace(os.sep, "/")
@@ -151,13 +151,13 @@ def docs_of(mem):
                     head = re.match(r"## \[([^\]]+)\]", part)
                     if head:
                         yield ("journal", rel, head.group(1), f[:-3] + ", " + head.group(1),
-                               part[:MAX_DOC_CHARS], "")
+                               part[:MAX_DOC_CHARS], "", {})
                 continue
             m, body = meta_of(text)
             kind = "rule" if top == "feedback" or (m.get("type") == "feedback") else "ref" if top == "ref" else "other"
             title = m.get("index_line") or m.get("description") or first_line(body) or f
             note = " ".join(x for x in (m.get("status", ""), ("seen " + m["seen"]) if m.get("seen") else "") if x)
-            yield (kind, rel, "", title, (m.get("description", "") + "\n" + body)[:MAX_DOC_CHARS], note)
+            yield (kind, rel, "", title, (m.get("description", "") + "\n" + body)[:MAX_DOC_CHARS], note, m)
 
 
 def memory_dirs(cwd, everything, extra):
@@ -195,7 +195,7 @@ def search(query, dirs, limit=5, kind=None):
                "anchor unindexed, shown unindexed, note unindexed, tokenize=\"unicode61 remove_diacritics 0\")")
     rows = []
     for mem in dirs:
-        for k, rel, anchor, title, text, note in docs_of(mem):
+        for k, rel, anchor, title, text, note, _ in docs_of(mem):
             if kind and k != kind:
                 continue
             rows.append((norm(title), norm(text), k, mem, rel, anchor, title, note))

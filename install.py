@@ -33,7 +33,8 @@ import time
 
 KIT = os.path.dirname(os.path.abspath(__file__))
 START, END = "<!-- memory-kit:start -->", "<!-- memory-kit:end -->"
-HOOK_FILES = ["kit.js", "session-start-context.js", "session-summary-check.js", "memory-index-hook.py"]
+HOOK_FILES = ["kit.js", "session-start-context.js", "session-summary-check.js", "memory-index-hook.py",
+              "memory-recall-hook.py"]
 SCRIPT_FILES = ["memory_index.py", "memory_search.py", "project_index.py", "find-zombies.ps1"]
 MEMORY_DIRS = ["feedback", "ref", "projects", "plans", "research", "reviews"]
 STAMP = time.strftime("%Y%m%d-%H%M%S")
@@ -197,6 +198,12 @@ def wanted_hooks(tool, tool_dir):
     if tool == "claude":      # у Codex правка файлов идёт другим инструментом; там хватает сборки в конце хода
         out.append(("PostToolUse", "Write|Edit|MultiEdit",
                     {"type": "command", "command": py("memory-index-hook.py", "post"), "timeout": 30}))
+        # память в нужный момент: правила перед коммитом и сервером, короткий контекст помощнику.
+        # У Codex не ставим: принимает ли он добавку в контекст на этих событиях, не проверено
+        out.append(("PreToolUse", "Bash|PowerShell",
+                    {"type": "command", "command": py("memory-recall-hook.py", "pre"), "timeout": 10}))
+        out.append(("SubagentStart", "",
+                    {"type": "command", "command": py("memory-recall-hook.py", "subagent"), "timeout": 10}))
     return out
 
 
@@ -204,7 +211,7 @@ def hook_key(command):
     """По чему узнаём свой хук в чужих настройках: имя скрипта + режим."""
     for name in HOOK_FILES:
         if name in command:
-            mode = "stop" if command.rstrip().endswith(" stop") else "post" if command.rstrip().endswith(" post") else ""
+            mode = next((m for m in ("stop", "post", "pre", "subagent") if command.rstrip().endswith(" " + m)), "")
             return name + ":" + mode
     return None
 
