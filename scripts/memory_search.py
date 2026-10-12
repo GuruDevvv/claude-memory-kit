@@ -23,6 +23,7 @@
   python memory_search.py "..." --kind rule|ref|journal|other
   python memory_search.py "..." --dir <папка memory>   # искать в названной папке (можно несколько раз)
   python memory_search.py "..." --json                 # для скриптов и хуков
+  python memory_search.py "..." --sessions             # искать в архиве разговоров (его ведёт session_archive.py)
 """
 import argparse
 import glob
@@ -56,6 +57,17 @@ def _places():
 
 
 PROJECTS_ROOT, CENTRAL = _places()
+
+
+def sessions_dir():
+    """Архив разговоров — там же, куда его кладёт session_archive.py."""
+    cfg = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "memory-kit.json")
+    try:
+        with open(cfg, encoding="utf-8") as fh:
+            data = json.load(fh)
+        return data.get("sessions_dir") or os.path.join(os.path.dirname(data["central"]), "sessions")
+    except Exception:
+        return os.path.join(os.path.expanduser("~"), ".agent-memory", "sessions")
 
 
 # Одно понятие — разные написания. Только то, что реально пишут двумя способами; основы, не слова.
@@ -160,6 +172,31 @@ def docs_of(mem):
             yield (kind, rel, "", title, (m.get("description", "") + "\n" + body)[:MAX_DOC_CHARS], note, m)
 
 
+def session_docs(archive):
+    """Архив разговоров: единица — реплика человека вместе с ответом агента на неё."""
+    for path in sorted(glob.glob(os.path.join(archive, "*", "*.md"))):
+        try:
+            text = read(path).replace("\r\n", "\n")
+        except OSError:
+            continue
+        rel = os.path.relpath(path, archive).replace(os.sep, "/")
+        project = re.search(r"(?m)^Проект: (.*)$", text)
+        project = os.path.basename(project.group(1).strip().rstrip("\\/")) if project else "?"
+        blocks = re.split(r"(?m)^(?=## \[)", text)[1:]
+        i = 0
+        while i < len(blocks):
+            head = re.match(r"## \[([^\]]+)\] (\S+)\n", blocks[i])
+            j = i + 1
+            while j < len(blocks) and not re.match(r"## \[[^\]]+\] человек", blocks[j]):
+                j += 1
+            body = "".join(blocks[i:j])
+            if head:
+                said = re.sub(r"\s+", " ", blocks[i][head.end():]).strip()
+                yield ("session", rel, head.group(1), "%s, %s: %s" % (project, head.group(1), said[:110]),
+                       body[:MAX_DOC_CHARS], "", {})
+            i = j
+
+
 def memory_dirs(cwd, everything, extra):
     if extra:
         return [os.path.abspath(d) for d in extra]
@@ -185,7 +222,7 @@ def groups_of(terms):
     return out
 
 
-def search(query, dirs, limit=5, kind=None):
+def search(query, dirs, limit=5, kind=None, sessions=False):
     """Список находок: {kind, dir, file, anchor, title, note, snippet}. Пустой запрос или нет совпадений — []."""
     groups = groups_of(query_terms(query))
     if not groups:
@@ -195,7 +232,7 @@ def search(query, dirs, limit=5, kind=None):
                "anchor unindexed, shown unindexed, note unindexed, tokenize=\"unicode61 remove_diacritics 0\")")
     rows = []
     for mem in dirs:
-        for k, rel, anchor, title, text, note, _ in docs_of(mem):
+        for k, rel, anchor, title, text, note, _ in (session_docs if sessions else docs_of)(mem):
             if kind and k != kind:
                 continue
             rows.append((norm(title), norm(text), k, mem, rel, anchor, title, note))
@@ -207,7 +244,7 @@ def search(query, dirs, limit=5, kind=None):
             "bm25(d, 6.0, 1.0) from d where d match ? order by bm25(d, 6.0, 1.0) limit 200", (expr,)).fetchall()
     except sqlite3.OperationalError:
         return []
-    weight = {"rule": 1.6, "ref": 1.3, "other": 1.0, "journal": 0.6}
+    weight = {"rule": 1.6, "ref": 1.3, "other": 1.0, "journal": 0.6, "session": 1.0}
     found = []
     for k, mem, rel, anchor, title, note, snip, ntitle, nbody, rank in cur:
         text = ntitle + "\n" + nbody
@@ -218,8 +255,12 @@ def search(query, dirs, limit=5, kind=None):
                                                 "note": note, "snippet": re.sub(r"\s+", " ", snip).strip()}))
     found.sort(key=lambda x: (x[0], x[1]))
     journal_cap = limit if kind == "journal" else max(1, limit // 3)
-    out, journals = [], 0
+    out, journals, seen = [], 0, set()
     for _, _, h in found:
+        key = (h["dir"], h["file"], h["anchor"], h["title"])      # продолженная сессия повторяет свои реплики
+        if key in seen:
+            continue
+        seen.add(key)
         if h["kind"] == "journal":
             if journals >= journal_cap:
                 continue
@@ -230,7 +271,7 @@ def search(query, dirs, limit=5, kind=None):
     return out
 
 
-KIND_RU = {"rule": "правило", "ref": "справочник", "journal": "журнал — как было, не правило", "other": "заметка"}
+KIND_RU = {"session": "разговор", "rule": "правило", "ref": "справочник", "journal": "журнал — как было, не правило", "other": "заметка"}
 
 
 def render(hits):
@@ -238,7 +279,7 @@ def render(hits):
     for h in hits:
         where = os.path.join(h["dir"], h["file"]).replace(os.sep, "/")
         tag = KIND_RU[h["kind"]] + (", " + h["note"] if h["note"] else "")
-        text = h["title"] if h["kind"] != "journal" else h["title"] + ": " + h["snippet"]
+        text = h["title"] if h["kind"] not in ("journal", "session") else h["title"] + " … " + h["snippet"]
         lines.append("- [%s] %s\n  %s" % (tag, re.sub(r"\s+", " ", text)[:300], where))
     return "\n".join(lines)
 
@@ -256,9 +297,13 @@ def main(argv):
     ap.add_argument("--kind", choices=sorted(KIND_RU))
     ap.add_argument("--dir", action="append", help="искать в этой папке памяти")
     ap.add_argument("--json", action="store_true")
+    ap.add_argument("--sessions", action="store_true", help="искать в архиве разговоров")
     a = ap.parse_args(argv)
-    dirs = memory_dirs(os.getcwd(), a.all, a.dir)
-    hits = search(" ".join(a.query), dirs, a.n, a.kind)
+    if a.sessions:
+        dirs, a.kind = a.dir or [sessions_dir()], None
+    else:
+        dirs = memory_dirs(os.getcwd(), a.all, a.dir)
+    hits = search(" ".join(a.query), dirs, a.n, a.kind, a.sessions)
     if a.json:
         print(json.dumps(hits, ensure_ascii=False, indent=1))
     elif hits:

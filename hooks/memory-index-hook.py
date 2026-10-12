@@ -6,7 +6,8 @@
           памяти -> пересобрать оглавление этой папки. Строка, дописанная в MEMORY.md
           руками, переедет в файл правила.
   stop  — в конце хода (Stop): пересобрать все папки памяти (ловит то, что писали
-          не через Write/Edit) и обновить список проектов PROJECT_INDEX.md.
+          не через Write/Edit), обновить список проектов PROJECT_INDEX.md и забрать в архив
+          разговоры законченных сессий, пока Claude Code их не стёр.
 
 Молчит, пока всё хорошо. Говорит, только если сборщик нашёл беду: потерю файла,
 превышение лимита, собственное падение. Ошибка хука не роняет сессию.
@@ -62,7 +63,9 @@ def main():
         data = {}
     problems = []
     if mode == "stop":
-        for script, args in (("memory_index.py", ["--all", "--quiet"]), ("project_index.py", ["--quiet"])):
+        # архив разговоров — по пять законченных сессий за ход: не тормозит конец хода и за день забирает всё
+        for script, args in (("memory_index.py", ["--all", "--quiet"]), ("project_index.py", ["--quiet"]),
+                             ("session_archive.py", ["--max", "5", "--quiet"])):
             code, out = run(script, args)
             if code != 0 and out:
                 problems.append(out)

@@ -35,7 +35,7 @@ KIT = os.path.dirname(os.path.abspath(__file__))
 START, END = "<!-- memory-kit:start -->", "<!-- memory-kit:end -->"
 HOOK_FILES = ["kit.js", "session-start-context.js", "session-summary-check.js", "memory-index-hook.py",
               "memory-recall-hook.py"]
-SCRIPT_FILES = ["memory_index.py", "memory_search.py", "project_index.py", "find-zombies.ps1"]
+SCRIPT_FILES = ["memory_index.py", "memory_search.py", "session_archive.py", "project_index.py", "find-zombies.ps1"]
 MEMORY_DIRS = ["feedback", "ref", "projects", "plans", "research", "reviews"]
 STAMP = time.strftime("%Y%m%d-%H%M%S")
 HOOKS_ALIVE = "memory-kit: хуки работают"      # та же строка — в hooks/kit.js
