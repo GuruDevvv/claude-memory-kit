@@ -78,7 +78,7 @@ python install.py --root ~/Projects --check
 ~/.agent-memory/central/            общая память, одна на все проекты
 ├── MEMORY.md                       оглавление — собирает скрипт
 ├── MEMORY.head.md                  шапка оглавления — пишете вы
-├── INDEX.md                        что не влезло в оглавление
+├── INDEX.md                        что не влезло в оглавление — по нему и по журналам ищет memory_search.py
 ├── PROJECT_INDEX.md                список проектов — собирает скрипт
 ├── feedback/                       правила работы, один файл на правило
 ├── ref/                            справочники

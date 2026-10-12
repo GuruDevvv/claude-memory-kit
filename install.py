@@ -34,7 +34,7 @@ import time
 KIT = os.path.dirname(os.path.abspath(__file__))
 START, END = "<!-- memory-kit:start -->", "<!-- memory-kit:end -->"
 HOOK_FILES = ["kit.js", "session-start-context.js", "session-summary-check.js", "memory-index-hook.py"]
-SCRIPT_FILES = ["memory_index.py", "project_index.py", "find-zombies.ps1"]
+SCRIPT_FILES = ["memory_index.py", "memory_search.py", "project_index.py", "find-zombies.ps1"]
 MEMORY_DIRS = ["feedback", "ref", "projects", "plans", "research", "reviews"]
 STAMP = time.strftime("%Y%m%d-%H%M%S")
 HOOKS_ALIVE = "memory-kit: хуки работают"      # та же строка — в hooks/kit.js
@@ -412,7 +412,8 @@ def install(args):
             codex_writable_note(doer, tool_dir, [memory_home] + ([projects_dir] if "claude" in tools else []))
         root_rules = os.path.join(root, spec["rules"])
         values = {"CENTRAL": fwd(central), "PROJECTS_DIR": fwd(projects_dir), "ROOT": fwd(root),
-                  "ROOT_RULES": fwd(root_rules), "AUTOLOAD": AUTOLOAD[tool], "HOOKCHECK": HOOKCHECK[tool], "ZOMBIES": zombies_text(tool_dir)}
+                  "ROOT_RULES": fwd(root_rules), "AUTOLOAD": AUTOLOAD[tool], "HOOKCHECK": HOOKCHECK[tool], "ZOMBIES": zombies_text(tool_dir),
+                  "SEARCH": "%s %s" % (python_cmd(), fwd(os.path.join(tool_dir, "scripts", "memory_search.py")))}
         put_block(doer, os.path.join(tool_dir, spec["rules"]), render("instructions.md", values), "Общие правила")
         put_block(doer, root_rules, render("root-rules.md", values), os.path.basename(root) + " — правила")
         if tool == "codex" and not args.dry_run:
