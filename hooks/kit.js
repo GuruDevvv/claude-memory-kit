@@ -35,7 +35,39 @@ function samePath(a, b) {
   return path.resolve(a).toLowerCase() === path.resolve(b).toLowerCase();
 }
 
+/** Путь b лежит внутри a (или совпадает). */
+function inside(a, b) {
+  const rel = path.relative(path.resolve(a), path.resolve(b));
+  return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
+}
+
+/**
+ * Папка проекта для рабочей папки cwd. Агента часто запускают из подпапки (src, docs):
+ * поднимаемся до ближайшей папки с HANDOFF.md. Выше корня проектов не идём, а сам корень
+ * проектом считаем, только если запущены прямо в нём: иначе его записка подменила бы записку проекта.
+ * Ничего не нашли — проектом остаётся сама cwd.
+ */
+function projectDir(cfg, cwd) {
+  const start = path.resolve(cwd);
+  const root = cfg && cfg.root ? path.resolve(cfg.root) : null;
+  let dir = start;
+  for (let i = 0; i < 12; i++) {
+    if (root && samePath(dir, root) && !samePath(dir, start)) break;
+    if (fs.existsSync(path.join(dir, 'HANDOFF.md'))) return dir;
+    const up = path.dirname(dir);
+    if (up === dir) break;
+    dir = up;
+  }
+  return start;
+}
+
+/** Папка похожа на проект: в ней есть записка либо она лежит под корнем проектов. */
+function isProject(cfg, dir) {
+  if (fs.existsSync(path.join(dir, 'HANDOFF.md'))) return true;
+  return !!(cfg && cfg.root) && inside(cfg.root, dir) && !samePath(cfg.root, dir);
+}
+
 // Метка «хук старта сработал». Ту же строку ищет агент по разделу правил (install.py, HOOKCHECK).
 const HOOKS_ALIVE = 'memory-kit: хуки работают';
 
-module.exports = { loadConfig, slug, projectMemoryDir, samePath, HOOKS_ALIVE };
+module.exports = { loadConfig, slug, projectMemoryDir, samePath, inside, projectDir, isProject, HOOKS_ALIVE };

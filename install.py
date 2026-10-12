@@ -37,6 +37,8 @@ HOOK_FILES = ["kit.js", "session-start-context.js", "session-summary-check.js", 
 SCRIPT_FILES = ["memory_index.py", "project_index.py", "find-zombies.ps1"]
 MEMORY_DIRS = ["feedback", "ref", "projects", "plans", "research", "reviews"]
 STAMP = time.strftime("%Y%m%d-%H%M%S")
+HOOKS_ALIVE = "memory-kit: хуки работают"      # та же строка — в hooks/kit.js
+CODEX_RULES_MAX = 32 * 1024                    # project_doc_max_bytes по умолчанию: дальше Codex файл правил не читает
 
 TOOLS = {
     "claude": {"dir": ".claude", "hooks_file": "settings.json", "rules": "CLAUDE.md", "inject_project_index": False},
@@ -413,6 +415,16 @@ def install(args):
                   "ROOT_RULES": fwd(root_rules), "AUTOLOAD": AUTOLOAD[tool], "HOOKCHECK": HOOKCHECK[tool], "ZOMBIES": zombies_text(tool_dir)}
         put_block(doer, os.path.join(tool_dir, spec["rules"]), render("instructions.md", values), "Общие правила")
         put_block(doer, root_rules, render("root-rules.md", values), os.path.basename(root) + " — правила")
+        if tool == "codex" and not args.dry_run:
+            for path in (os.path.join(tool_dir, spec["rules"]), root_rules):
+                size = os.path.getsize(path)
+                if size > CODEX_RULES_MAX:
+                    say("  ! %s весит %d байт, а Codex читает только первые %d: конец файла он не увидит."
+                        % (fwd(path), size, CODEX_RULES_MAX))
+                    say("    Сократи файл или подними project_doc_max_bytes в config.toml.")
+                elif size > CODEX_RULES_MAX * 0.9:
+                    say("  ! %s: %d из %d байт, до потолка Codex осталось %d. Дальше он молча обрежет конец."
+                        % (fwd(path), size, CODEX_RULES_MAX, CODEX_RULES_MAX - size))
 
     for project in args.project or []:
         project = os.path.abspath(os.path.expanduser(project))
@@ -489,8 +501,20 @@ def check(args):
         if shutil.which("node"):
             r = subprocess.run(["node", os.path.join(tool_dir, "hooks", "session-start-context.js")],
                                cwd=root, capture_output=True, text=True, encoding="utf-8", errors="replace")
-            ok = r.returncode == 0 and (not r.stdout.strip() or "additionalContext" in r.stdout)
-            line(ok, "хук начала сессии запускается (отдал %d знаков контекста)" % len(r.stdout))
+            try:                                     # пустой ответ — не успех: хук обязан отдать метку и оглавление
+                ctx = json.loads(r.stdout)["hookSpecificOutput"]["additionalContext"]
+            except (ValueError, KeyError, TypeError):
+                ctx = ""
+            line(r.returncode == 0 and HOOKS_ALIVE in ctx, "хук начала сессии отдаёт метку «%s»" % HOOKS_ALIVE)
+            index = os.path.join(central, "MEMORY.md")
+            if os.path.exists(index) and read(index).strip():
+                line(read(index).replace("\r\n", "\n").strip()[:200] in ctx.replace("\r\n", "\n"),
+                     "общее оглавление доходит до агента (контекст %d знаков)" % len(ctx))
+        if tool == "codex":
+            for path in (rules, os.path.join(root, spec["rules"])):
+                if os.path.exists(path):
+                    line(os.path.getsize(path) <= CODEX_RULES_MAX, "%s влезает в потолок Codex: %d из %d байт"
+                         % (fwd(path), os.path.getsize(path), CODEX_RULES_MAX))
         r = subprocess.run([sys.executable, os.path.join(tool_dir, "scripts", "memory_index.py"), central, "--dry"],
                            capture_output=True, text=True, encoding="utf-8", errors="replace",
                            env=dict(os.environ, PYTHONIOENCODING="utf-8"))

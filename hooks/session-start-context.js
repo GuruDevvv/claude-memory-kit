@@ -5,6 +5,8 @@
  *      Безопасный режим: файлы обновляются, только если в папке нет несохранённых
  *      правок и изменения ложатся поверх без слияния. Иначе — только показывает, что пришло.
  *   2) HANDOFF.md проекта + последние записи его журнала из центральной памяти.
+ *      Проект ищется вверх от рабочей папки: запуск из подпапки записку не теряет.
+ *      Журнал приходит и без записки, если папка лежит под корнем проектов.
  *   3) Оглавление общей памяти (MEMORY.md) — всем; оглавление памяти проекта — тем,
  *      кто не подгружает его сам (Codex; Claude Code свою память проекта читает без хука).
  * Любая ошибка (нет сети, нет репозитория, нет HANDOFF) молча пропускается:
@@ -119,7 +121,8 @@ try {
   if (!cfg) process.exit(0);
 
   const cwd = process.cwd();
-  const projectName = path.basename(cwd);
+  const project = kit.projectDir(cfg, cwd);
+  const projectName = path.basename(project);
   const parts = [];
 
   // --- 1. Автосинк (любая папка с репозиторием) ---
@@ -131,12 +134,13 @@ try {
   }
 
   // --- 2. HANDOFF.md + журнал проекта ---
-  const handoffPath = path.join(cwd, 'HANDOFF.md');
+  const handoffPath = path.join(project, 'HANDOFF.md');
   if (fs.existsSync(handoffPath)) {
     const handoff = fs.readFileSync(handoffPath, 'utf-8').trim();
-    parts.push('### HANDOFF.md\n\n' +
+    parts.push('### HANDOFF.md' + (kit.samePath(project, cwd) ? '' : ' (' + handoffPath + ')') + '\n\n' +
       clip(handoff, HANDOFF_MAX_CHARS, 'HANDOFF обрезан — открой HANDOFF.md полностью') + '\n');
-
+  }
+  if (kit.isProject(cfg, project)) {
     const journalPath = path.join(cfg.central, 'projects', projectName + '.md');
     if (fs.existsSync(journalPath)) {
       const journal = fs.readFileSync(journalPath, 'utf-8');
@@ -167,7 +171,7 @@ try {
       }
     };
     add('Память: общее оглавление', cfg.central);
-    if (cfg.inject_project_index) add('Память: оглавление этого проекта', kit.projectMemoryDir(cfg, cwd));
+    if (cfg.inject_project_index) add('Память: оглавление этого проекта', kit.projectMemoryDir(cfg, project));
   }
 
   // Метку пишем всегда: по её отсутствию агент понимает, что хуки не запускаются

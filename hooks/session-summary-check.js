@@ -39,21 +39,24 @@ try {
 
   const todayStart = new Date(today).getTime();
   const journals = path.join(cfg.central, 'projects');
+  const projectPath = kit.projectDir(cfg, process.cwd());
+  const project = path.basename(projectPath);
+  const fresh = f => {
+    try { return fs.statSync(path.join(journals, f)).mtimeMs >= todayStart; } catch (e) { return false; }
+  };
   let journalToday = true; // папки нет — не ворчим
   if (fs.existsSync(journals)) {
-    journalToday = fs.readdirSync(journals)
-      .filter(f => f.endsWith('.md'))
-      .some(f => {
-        try { return fs.statSync(path.join(journals, f)).mtimeMs >= todayStart; } catch (e) { return false; }
-      });
+    // В проекте смотрим его журнал: запись в чужой не значит, что этот сохранён.
+    // Вне проекта (разовая папка) хватает записи в любом.
+    journalToday = kit.isProject(cfg, projectPath)
+      ? fresh(project + '.md')
+      : fs.readdirSync(journals).filter(f => f.endsWith('.md')).some(fresh);
   }
 
-  const cwd = process.cwd();
-  const project = path.basename(cwd);
   let handoffAge = 0;
   try {
-    handoffAge = (Date.now() - fs.statSync(path.join(cwd, 'HANDOFF.md')).mtimeMs) / 3600000;
-  } catch (e) { /* в этой папке HANDOFF нет */ }
+    handoffAge = (Date.now() - fs.statSync(path.join(projectPath, 'HANDOFF.md')).mtimeMs) / 3600000;
+  } catch (e) { /* у проекта HANDOFF нет */ }
 
   const reasons = [];
   if (!journalToday) {
