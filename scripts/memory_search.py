@@ -9,6 +9,12 @@
 ни своего хранилища. Индекс каждый раз собирается в памяти из файлов — устареть ему негде.
 Русские окончания: слово запроса обрезается до основы и ищется как начало слова («коммитить» -> «коммит*»).
 Единица поиска — файл правила или справочника, а в журнале — одна запись («## [дата]»).
+Порядок выдачи: близость по тексту, помноженная на вес вида (правило выше справочника, журнал ниже всех)
+и на долю найденных слов запроса.
+Записей журнала в выдаче не больше трети: журнал рассказывает, как делали раньше, в том числе
+приёмы, которые потом запретили (проба 12.10.2026: на «копия файла входа телеграм» первыми шли
+три старые записи с отменённым рецептом, а действующий запрет не находился вовсе).
+Одно и то же слово на двух языках (telegram и телеграм, deploy и деплой) сведено таблицей ALIASES.
 
 Запуск:
   python memory_search.py "деплой на сервер pm2"      # общая память + память проекта текущей папки
@@ -50,6 +56,16 @@ def _places():
 
 
 PROJECTS_ROOT, CENTRAL = _places()
+
+
+# Одно понятие — разные написания. Только то, что реально пишут двумя способами; основы, не слова.
+ALIASES = [
+    ("telegram", "телегр", "тг"), ("git", "гит"), ("commit", "комми"), ("push", "пуш"),
+    ("deploy", "депло", "выкат", "выкладк", "выложи"), ("server", "серве", "vps"), ("hook", "хук"),
+    ("codex", "кодекс"), ("claude", "клод"), ("script", "скрип"), ("token", "токен"),
+    ("prompt", "промпт"), ("backup", "бэкап", "бекап"), ("slides", "слайд"), ("landing", "лендинг"),
+    ("screenshot", "скриншот", "снимк"), ("browser", "браузер"), ("handoff", "записк"),
+]
 
 
 def norm(text):
@@ -158,10 +174,21 @@ def memory_dirs(cwd, everything, extra):
     return dirs
 
 
+def groups_of(terms):
+    """Основа запроса -> все её написания: «телегр» ищется и как telegram."""
+    out = []
+    for t in terms:
+        g = next((a for a in ALIASES if any(t.startswith(x) or x.startswith(t) and len(t) >= 4 for x in a)), None)
+        g = tuple(dict.fromkeys((t,) + g)) if g else (t,)
+        if g not in out:
+            out.append(g)
+    return out
+
+
 def search(query, dirs, limit=5, kind=None):
     """Список находок: {kind, dir, file, anchor, title, note, snippet}. Пустой запрос или нет совпадений — []."""
-    terms = query_terms(query)
-    if not terms:
+    groups = groups_of(query_terms(query))
+    if not groups:
         return []
     db = sqlite3.connect(":memory:")
     db.execute("create virtual table d using fts5(title, body, kind unindexed, dir unindexed, file unindexed, "
@@ -173,31 +200,37 @@ def search(query, dirs, limit=5, kind=None):
                 continue
             rows.append((norm(title), norm(text), k, mem, rel, anchor, title, note))
     db.executemany("insert into d values (?,?,?,?,?,?,?,?)", rows)
-    # сперва строго (все слова), потом мягко (любое): короткий запрос точнее, длинный не остаётся без ответа
-    quoted = ['"%s"*' % t.replace('"', "") for t in terms]
-    seen, out = set(), []
-    for expr in (" AND ".join(quoted), " OR ".join(quoted)):
-        try:
-            cur = db.execute(
-                "select kind, dir, file, anchor, shown, note, snippet(d, 1, '', '', ' … ', 18) "
-                "from d where d match ? order by bm25(d, 6.0, 1.0) * "
-                "case kind when 'rule' then 1.6 when 'ref' then 1.3 when 'journal' then 0.6 else 1.0 end "
-                "limit ?", (expr, limit * 3))     # правило важнее рассказа о том, как на него наступили
-        except sqlite3.OperationalError:
-            continue
-        for k, mem, rel, anchor, title, note, snip in cur:
-            key = (mem, rel, anchor)
-            if key in seen:
+    expr = " OR ".join('"%s"*' % t.replace('"', "") for g in groups for t in g)
+    try:
+        cur = db.execute(
+            "select kind, dir, file, anchor, shown, note, snippet(d, 1, '', '', ' … ', 18), title, body, "
+            "bm25(d, 6.0, 1.0) from d where d match ? order by bm25(d, 6.0, 1.0) limit 200", (expr,)).fetchall()
+    except sqlite3.OperationalError:
+        return []
+    weight = {"rule": 1.6, "ref": 1.3, "other": 1.0, "journal": 0.6}
+    found = []
+    for k, mem, rel, anchor, title, note, snip, ntitle, nbody, rank in cur:
+        text = ntitle + "\n" + nbody
+        hit = sum(1 for g in groups if any(re.search(r"(?<![0-9a-zа-я_])" + re.escape(t), text) for t in g))
+        # близость по тексту, вес вида и доля найденных слов запроса; жёсткий порядок «сперва по числу слов»
+        # проверен и хуже: длинные тексты набирают слова случайно (12 из 16 против 14 на прошлых ошибках)
+        found.append((0, rank * weight[k] * (1 + hit / len(groups)), {"kind": k, "dir": mem, "file": rel, "anchor": anchor, "title": title,
+                                                "note": note, "snippet": re.sub(r"\s+", " ", snip).strip()}))
+    found.sort(key=lambda x: (x[0], x[1]))
+    journal_cap = limit if kind == "journal" else max(1, limit // 3)
+    out, journals = [], 0
+    for _, _, h in found:
+        if h["kind"] == "journal":
+            if journals >= journal_cap:
                 continue
-            seen.add(key)
-            out.append({"kind": k, "dir": mem, "file": rel, "anchor": anchor, "title": title, "note": note,
-                        "snippet": re.sub(r"\s+", " ", snip).strip()})
-            if len(out) >= limit:
-                return out
+            journals += 1
+        out.append(h)
+        if len(out) >= limit:
+            break
     return out
 
 
-KIND_RU = {"rule": "правило", "ref": "справочник", "journal": "журнал", "other": "заметка"}
+KIND_RU = {"rule": "правило", "ref": "справочник", "journal": "журнал — как было, не правило", "other": "заметка"}
 
 
 def render(hits):
