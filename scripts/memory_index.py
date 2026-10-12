@@ -10,8 +10,11 @@
   * MEMORY.head.md — неизменная шапка (правила пользования, указатели). Пишется руками, мала.
   * Строка оглавления живёт в САМОМ файле правила: metadata.index_line (текст строки)
     и metadata.moment (раздел оглавления). Файл — источник правды, оглавление — выжимка.
-  * Кандидаты ранжируются (закреплено > «правило» > «проба», потом seen, потом свежесть)
-    и набираются, пока влезают в бюджет. Не влезшее уходит в INDEX.md — ничего не теряется.
+  * Кандидаты набираются, пока влезают в бюджет: сперва закреплённое и раздел «Всегда»,
+    затем по очереди проверенное (правило с seen >= 2) и новое (правили за последние 2 недели),
+    затем остальное. Очередь нужна, чтобы ни новое не вытесняло проверенное, ни наоборот:
+    замер 12.10.2026 — при одной общей шкале в оглавлении было 2 проверенных правила из 52.
+    Не влезшее уходит в INDEX.md — ничего не теряется.
   * Сверка счёта: каждый файл правила обязан оказаться либо в MEMORY.md, либо в INDEX.md.
     Иначе — код возврата 2 и список потерь (однажды ручная перестройка потеряла 16 записей).
   * Самолечение: если сессия дописала строку в MEMORY.md руками (так велит сам Claude Code),
@@ -28,6 +31,7 @@
   --quiet   печатать только проблемы
 """
 import glob
+import itertools
 import json
 import os
 import re
@@ -326,6 +330,19 @@ def score(m, path, now):
             + min(seen, 5) * 4 + (150 if fresh else 0))   # новое видно 2 недели
 
 
+def ranked(cands, pos):
+    """Порядок набора в оглавление: закреплённое, потом проверенное и новое по очереди, потом остальное."""
+    def key(c):
+        return (-c["score"], pos.get(c["file"], 10 ** 6), c["file"])
+    top = sorted((c for c in cands if c["score"] >= 1000), key=key)
+    low = [c for c in cands if c["score"] < 1000]
+    proven = sorted((c for c in low if c["proven"]), key=key)
+    fresh = sorted((c for c in low if c["fresh"] and not c["proven"]), key=lambda c: (-c["mtime"], c["file"]))
+    rest = sorted((c for c in low if not c["proven"] and not c["fresh"]), key=key)
+    mixed = [c for pair in itertools.zip_longest(proven, fresh) for c in pair if c]
+    return top + mixed + rest
+
+
 def build(mem, dry=False, quiet=False):
     mem = os.path.abspath(mem)
     if dry:
@@ -416,8 +433,10 @@ def _build(mem, dry, quiet):
         line = m.get("index_line") or f"[{m.get('name') or os.path.basename(r)}]({r}) — {m.get('description', '')}".rstrip(" —")
         if f"]({r})" not in line and r not in line:
             line = f"{line} [файл]({r})"
-        cands.append({"file": r, "line": "- " + line, "moment": m.get("moment") or "Новое",
-                      "score": score(m, os.path.join(mem, r), now)})
+        sc = score(m, os.path.join(mem, r), now)
+        mtime = os.path.getmtime(os.path.join(mem, r))
+        cands.append({"file": r, "line": "- " + line, "moment": m.get("moment") or "Новое", "score": sc,
+                      "proven": sc % 1000 >= 300, "fresh": now - mtime < RECENT_DAYS * 86400, "mtime": mtime})
 
     # 3) набор по бюджету
     head_text = head.rstrip("\n")
@@ -431,7 +450,7 @@ def _build(mem, dry, quiet):
     for i, e in enumerate(entries):
         pos.setdefault(e["files"][0], i)
     chosen, left = [], []
-    for c in sorted(cands, key=lambda c: (-c["score"], pos.get(c["file"], 10 ** 6), c["file"])):
+    for c in ranked(cands, pos):
         add_b = len(c["line"] + "\n") + (0 if any(x["moment"] == c["moment"] for x in chosen)
                                           else len(f"\n## {c['moment']}\n\n"))
         add_l = 1 if any(x["moment"] == c["moment"] for x in chosen) else 4

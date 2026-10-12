@@ -117,6 +117,18 @@ unproven = rule(mem, "feedback_unp", "z", status="правило", seen=1, age_d
 su = mi.score(mi.meta(unproven), unproven, now)
 check(f"свежая проба ({sn}) выше старого неподтверждённого ({su}): новое видно две недели", sn > su)
 
+# 5б. тесный бюджет: проверенное и новое делят место по очереди, никто не вытеснен целиком
+mem = sandbox()
+for i in range(30):
+    rule(mem, f"feedback_p{i:02d}", f"[П{i}](feedback/feedback_p{i:02d}.md) — проверенное {i} " + "х" * 60,
+         status="правило", seen=3, age_days=90)
+    rule(mem, f"feedback_n{i:02d}", f"[Н{i}](feedback/feedback_n{i:02d}.md) — новое {i} " + "х" * 60, status="проба")
+budget, mi.BUDGET_CHARS = mi.BUDGET_CHARS, 3000
+mi.build(mem)
+mi.BUDGET_CHARS = budget
+np_, nn = memory(mem).count("проверенное"), memory(mem).count("новое")
+check(f"в тесном оглавлении есть и проверенные ({np_}), и новые ({nn})", np_ >= 8 and nn >= 8 and abs(np_ - nn) <= 1)
+
 # 6. две сборки сразу: 8 процессов, ни одного падения, оглавление целое
 mem = sandbox()
 for i in range(40):
