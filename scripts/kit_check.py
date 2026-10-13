@@ -36,7 +36,8 @@ TOOLS = {
 WANTED = {
     "claude": [("SessionStart", "session-start-context.js", ""), ("Stop", "session-summary-check.js", ""),
                ("Stop", "memory-index-hook.py", "stop"), ("PostToolUse", "memory-index-hook.py", "post"),
-               ("PreToolUse", "memory-recall-hook.py", "pre"), ("SubagentStart", "memory-recall-hook.py", "subagent")],
+               ("PreToolUse", "memory-recall-hook.py", "pre"), ("SubagentStart", "memory-recall-hook.py", "subagent"),
+               ("UserPromptSubmit", "memory-recall-hook.py", "prompt")],
     "codex": [("SessionStart", "session-start-context.js", ""), ("Stop", "session-summary-check.js", ""),
               ("Stop", "memory-index-hook.py", "stop")],
 }

@@ -130,6 +130,19 @@ check("запрет: git add -A остановлен, и каждый раз", c
 check("docker на своей машине — не сервер", recall("pre", {"session_id": sid + "d", "cwd": proj, "tool_name": "Bash",
       "tool_input": {"command": "docker run --rm python:3.11-slim python -V"}}) == "")
 
+# подсказка по словам просьбы
+write(os.path.join(central, "feedback", "feedback_slides.md"), "---\nname: sl\nmetadata:\n  type: feedback\n"
+      "  index_line: \"Слайды кликами не править, собирать конвейером\"\n---\n\nпрезентация Google Slides: правка текста\n")
+ctx = recall("prompt", {"session_id": sid, "cwd": proj, "prompt": "Поправь заголовок на третьем слайде"})
+check("просьба про слайд приносит правило про слайды", "кликами не править" in ctx and not ctx.startswith("ОТКАЗ"), ctx[:300])
+check("вторая просьба про слайды за сессию — без повтора",
+      recall("prompt", {"session_id": sid, "cwd": proj, "prompt": "и ещё один слайд поправь"}) == "")
+check("обычная просьба и команда со слэшем — без подсказки",
+      recall("prompt", {"session_id": sid + "p", "cwd": proj, "prompt": "ок, делай"}) == ""
+      and recall("prompt", {"session_id": sid + "p", "cwd": proj, "prompt": "/slides слайд"}) == "")
+check("слово «слайд» в команде оболочки подсказку не вызывает", recall("pre", {"session_id": sid + "p", "cwd": proj,
+      "tool_name": "Bash", "tool_input": {"command": "echo слайд"}}) == "")
+
 # журнал срабатываний
 events = [json.loads(x) for x in io.open(os.path.join(central, ".metrics", "events.jsonl"), encoding="utf-8")]
 kinds = [(e["event"], e.get("key")) for e in events]
@@ -201,6 +214,7 @@ check("помощник получает записку проекта и ком
       and len(ctx) <= 3000, ctx[:300])
 settings = json.load(open(os.path.join(home, ".claude", "settings.json"), encoding="utf-8"))["hooks"]
 check("хуки момента прописаны у Claude и не прописаны у Codex", "SubagentStart" in settings
+      and any("memory-recall-hook.py prompt" in h["command"] for g in settings["UserPromptSubmit"] for h in g["hooks"])
       and any("memory-recall-hook" in h["command"] for g in settings["PreToolUse"] for h in g["hooks"])
       and "memory-recall" not in io.open(os.path.join(home, ".codex", "hooks.json"), encoding="utf-8").read())
 

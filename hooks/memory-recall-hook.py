@@ -9,6 +9,9 @@
               получает до пяти строк правил по теме. Один раз за сессию на тему, чтобы не шуметь.
               Пуш и команды на сервер в первый раз за сессию останавливаются: правила приходят
               причиной отказа, повтор команды проходит. Отключается ключом "recall_block": false.
+  prompt    — UserPromptSubmit: человек просит о деле, у которого нет своей команды (поправить слайд,
+              переделать экран, разобрать чат), — те же до пяти строк правил приходят вместе с просьбой.
+              Никогда не останавливает. Раз за сессию на тему.
   subagent  — SubagentStart: помощник стартует без записки проекта и без памяти и потому выдаёт
               известное за новое. Получает записку, раздел «Всегда» и команду поиска, до 3 тыс. знаков.
 
@@ -32,8 +35,24 @@ HANDOFF_CHARS = 1200
 ALWAYS_CHARS = 1300
 ALWAYS_LINE_CHARS = 170
 
-# pattern — по тексту команды; moments — основы слов в названии раздела правила; query — слова для поиска
+# pattern — по тексту команды; prompt — по тексту просьбы человека; moments — основы слов в названии
+# раздела правила; query — слова для поиска
+_UI = r"(?:экран|страниц|интерфейс|форм[уаы]|панел|кабинет|лендинг|сайт|дашборд|меню)"
+_CHAT = r"(?:чат|переписк|диалог|телеграм|telegram)"
+_READ = r"(?:разбер|разбор|проанализир|прочитай|прочти|изучи|выжимк|саммари|резюмир|о\s+чём\s+договор)"
 GROUPS = [
+    # три темы без своей команды: прогон 13.10.2026 показал, что правило есть и поиск его находит,
+    # но без подсказки агент его не применяет (слайды кликами, переделка экрана без описи)
+    {"key": "slides", "title": "слайды и презентации",
+     "prompt": r"слайд|презентац|google\s*slides|\bpptx\b",
+     "query": "слайды презентация Google Slides правка текста перенос"},
+    {"key": "redesign", "title": "переделка экрана",
+     "prompt": r"редизайн|(?:передел|переверст|перевёрст|перерис|перестро)[^.!?\n]{0,60}" + _UI
+               + "|" + _UI + r"[^.!?\n]{0,40}(?:передел|переверст|перевёрст|перерис|перестро)",
+     "query": "переделка экрана редизайн опись действий инструкции кнопки"},
+    {"key": "chat", "title": "разбор переписки",
+     "prompt": _READ + r"[^.!?\n]{0,60}" + _CHAT + "|" + _CHAT + r"[^.!?\n]{0,40}" + _READ,
+     "query": "разобрать переписку чат Telegram голосовые расшифровать"},
     {"key": "commit", "title": "коммит и публикация",
      "pattern": r"\bgit\s+(?:-[Cc]\s+\S+\s+)*(?:commit|push|add|merge|rebase|reset|tag)\b|\bgh\s+(?:pr|release)\s+(?:create|merge)",
      "block": r"\bgit\s+(?:-[Cc]\s+\S+\s+)*push\b|\bgh\s+(?:pr|release)\s+(?:create|merge)",
@@ -192,7 +211,8 @@ def pre(data, cfg):
     command = (data.get("tool_input") or {}).get("command") or ""
     if not command:
         return None
-    group = next((g for g in cfg.get("recall") or GROUPS if re.search(g["pattern"], command, re.I | re.M)), None)
+    group = next((g for g in cfg.get("recall") or GROUPS
+                  if g.get("pattern") and re.search(g["pattern"], command, re.I | re.M)), None)
     if not group:
         return None
     # Добавка в контекст приходит агенту вместе с результатом команды, то есть уже после неё
@@ -200,25 +220,44 @@ def pre(data, cfg):
     # такую команду один раз за сессию останавливаем, правила уходят причиной отказа, повтор проходит.
     stop = bool(group.get("block")) and re.search(group["block"], command, re.I | re.M) \
         and cfg.get("recall_block", True)
-    mark = group["key"] + (":block" if stop else "")
-    if seen_before(data.get("session_id"), mark, mark=False):
-        return None                           # в журнал не пишем: повтор темы в той же сессии — не событие
-    ms = load("memory_search")
-    rows = pick(ms, group, command, ms.memory_dirs(data.get("cwd") or os.getcwd(), False, None))
-    if not rows:
-        note(data, cfg, "recall_empty", key=group["key"])      # тема была, правил не нашлось: дыра в памяти
+    lines = remind(data, cfg, group, command, group["key"] + (":block" if stop else ""), bool(stop))
+    if not lines:
         return None
-    seen_before(data.get("session_id"), mark)  # отметку ставим, только когда есть что показать
-    note(data, cfg, "recall", key=group["key"], blocked=bool(stop) or None, files=[r[1] for r in rows])
-    lines = ["Память, тема «%s» — правила, которые ты уже записывал:" % group.get("title", group["key"])]
-    for _, rel, title, _ in rows:
-        lines.append("- %s (%s)" % (clean(title), rel))
-    lines.append("Файлы лежат в " + ", ".join(dict.fromkeys(r[3] for r in rows)))
     if stop:
         lines.append("Команда остановлена один раз, чтобы ты сверился до неё, а не после. Правилам не "
                      "противоречит — повтори её без изменений, второй раз она пройдёт. Противоречит — исправь.")
         return "deny", "\n".join(lines)
     return "PreToolUse", "\n".join(lines)
+
+
+def remind(data, cfg, group, text, mark, blocked=False):
+    """Строки подсказки по теме или None: тему в этой сессии уже показывали либо правил не нашлось."""
+    if seen_before(data.get("session_id"), mark, mark=False):
+        return None                           # в журнал не пишем: повтор темы в той же сессии — не событие
+    ms = load("memory_search")
+    rows = pick(ms, group, text, ms.memory_dirs(data.get("cwd") or os.getcwd(), False, None))
+    if not rows:
+        note(data, cfg, "recall_empty", key=group["key"])      # тема была, правил не нашлось: дыра в памяти
+        return None
+    seen_before(data.get("session_id"), mark)  # отметку ставим, только когда есть что показать
+    note(data, cfg, "recall", key=group["key"], blocked=blocked or None, files=[r[1] for r in rows])
+    lines = ["Память, тема «%s» — правила, которые ты уже записывал:" % group.get("title", group["key"])]
+    for _, rel, title, _ in rows:
+        lines.append("- %s (%s)" % (clean(title), rel))
+    lines.append("Файлы лежат в " + ", ".join(dict.fromkeys(r[3] for r in rows)))
+    return lines
+
+
+def prompt(data, cfg):
+    """Просьба человека о деле без своей команды: правила приходят вместе с просьбой, остановки нет."""
+    text = re.sub(r"(?s)<system-reminder>.*?</system-reminder>", " ", data.get("prompt") or "")[:2000]
+    if not text.strip() or text.lstrip().startswith("/"):
+        return None
+    out = []
+    for group in cfg.get("recall") or GROUPS:
+        if group.get("prompt") and re.search(group["prompt"], text, re.I | re.M):
+            out += remind(data, cfg, group, text, group["key"]) or []
+    return ("UserPromptSubmit", "\n".join(out)) if out else None
 
 
 def project_dir(cwd, root):
@@ -270,7 +309,7 @@ def main():
         data = json.loads(sys.stdin.buffer.read().decode("utf-8", errors="replace") or "{}")
     except Exception:
         data = {}
-    res = (subagent if mode == "subagent" else pre)(data, config())
+    res = {"subagent": subagent, "prompt": prompt}.get(mode, pre)(data, config())
     if res and res[0] == "deny":
         print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
                                                  "permissionDecisionReason": res[1]}}, ensure_ascii=True))

@@ -204,6 +204,8 @@ def wanted_hooks(tool, tool_dir):
         # У Codex не ставим: принимает ли он добавку в контекст на этих событиях, не проверено
         out.append(("PreToolUse", "Bash|PowerShell",
                     {"type": "command", "command": py("memory-recall-hook.py", "pre"), "timeout": 10}))
+        out.append(("UserPromptSubmit", "",
+                    {"type": "command", "command": py("memory-recall-hook.py", "prompt"), "timeout": 10}))
         out.append(("SubagentStart", "",
                     {"type": "command", "command": py("memory-recall-hook.py", "subagent"), "timeout": 10}))
     return out

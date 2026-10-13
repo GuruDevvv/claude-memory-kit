@@ -117,6 +117,7 @@
 | `Stop` | все | `python <папка агента>/hooks/memory-index-hook.py stop`, ожидание 60 с |
 | `PostToolUse` | `Write\|Edit\|MultiEdit` | `python <папка агента>/hooks/memory-index-hook.py post`, ожидание 30 с |
 | `PreToolUse` | `Bash\|PowerShell` | `python <папка агента>/hooks/memory-recall-hook.py pre`, ожидание 10 с |
+| `UserPromptSubmit` | все | `python <папка агента>/hooks/memory-recall-hook.py prompt`, ожидание 10 с |
 | `SubagentStart` | все | `python <папка агента>/hooks/memory-recall-hook.py subagent`, ожидание 10 с |
 
 **Codex**, файл `~/.codex/hooks.json`: только первые три строки таблицы. Новые хуки Codex пропускает,
