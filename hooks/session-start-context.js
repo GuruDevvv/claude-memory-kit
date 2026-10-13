@@ -174,6 +174,19 @@ try {
     if (cfg.inject_project_index) add('Память: оглавление этого проекта', kit.projectMemoryDir(cfg, project));
   }
 
+  // --- 4. Установка разошлась с набором: говорим агенту сами, человек проверку запускать не будет ---
+  try {
+    const drift = kit.driftFromKit(cfg);
+    if (drift.behind.length || drift.edited.length) {
+      const lines = [];
+      if (drift.behind.length) lines.push('набор обновился, здесь старые файлы: ' + drift.behind.join(', '));
+      if (drift.edited.length) lines.push('файлы поправлены на месте мимо набора: ' + drift.edited.join(', '));
+      parts.push('### memory-kit: установка разошлась с набором\n\n' + lines.join('\n') + '\n\n' +
+        'Скажи об этом человеку одной строкой в первом ответе и предложи обновить. Порядок — в ' +
+        path.join(cfg.kit_dir, 'INSTALL.md') + ', раздел «Обновление». Без его «да» файлы не меняй.\n');
+    }
+  } catch (e) { /* сверка не критична */ }
+
   // Метку пишем всегда: по её отсутствию агент понимает, что хуки не запускаются
   // (в Codex — не подтверждены через /hooks), и сам говорит об этом человеку.
   console.log(JSON.stringify({

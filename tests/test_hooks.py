@@ -180,6 +180,25 @@ check("переустановка не теряет свои ключи наст
 code, out = kit_check(".claude")
 check("kit_check берёт папку набора из настроек", code == 0 and "сверка с набором" in out, out[-900:])
 
+# установка разошлась с набором: хук начала сессии говорит об этом сам
+ctx = start_hook(proj)
+check("файлы совпадают с набором: хук старта про расхождение молчит", "разошлась с набором" not in ctx, ctx[-300:])
+write(drift, keep_drift + "\n# правка мимо набора\n")
+ctx = start_hook(proj)
+check("файл поправили на месте: хук старта называет его", "разошлась с набором" in ctx
+      and "поправлены на месте" in ctx and "scripts/memory_search.py" in ctx, ctx[-400:])
+write(drift, keep_drift)
+old = time.time() - 86400
+os.utime(drift, (old, old))
+stale = os.path.join(home, ".claude", "hooks", "memory-recall-hook.py")
+write(stale, "# старая версия\n")
+os.utime(stale, (old, old))
+ctx = start_hook(proj)
+check("набор ушёл вперёд: хук старта называет отставший файл", "набор обновился" in ctx
+      and "hooks/memory-recall-hook.py" in ctx, ctx[-400:])
+installer("--tool", "claude")
+check("после обновления хук старта снова молчит", "разошлась с набором" not in start_hook(proj))
+
 # пустой ответ хука — провал проверки
 hook = os.path.join(home, ".claude", "hooks", "session-start-context.js")
 keep = io.open(hook, encoding="utf-8").read()

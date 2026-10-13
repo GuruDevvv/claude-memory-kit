@@ -70,4 +70,37 @@ function isProject(cfg, dir) {
 // Метка «хук старта сработал». Ту же строку ищет агент по разделу правил (install.py, HOOKCHECK).
 const HOOKS_ALIVE = 'memory-kit: хуки работают';
 
-module.exports = { loadConfig, slug, projectMemoryDir, samePath, inside, projectDir, isProject, HOOKS_ALIVE };
+// Файлы набора в папке агента. Тот же список — в install.py и scripts/kit_check.py.
+const KIT_FILES = {
+  hooks: ['kit.js', 'session-start-context.js', 'session-summary-check.js', 'memory-index-hook.py',
+    'memory-recall-hook.py'],
+  scripts: ['memory_index.py', 'memory_search.py', 'session_archive.py', 'project_index.py', 'kit_check.py',
+    'find-zombies.ps1'],
+};
+
+/**
+ * Чем установленные файлы отличаются от папки набора (ключ kit_dir в настройках).
+ * Возвращает { behind: [...], edited: [...] }: набор ушёл вперёд либо файл поправили на месте.
+ * Различаем по времени правки; перевод строк не в счёт. Нет kit_dir или папки — пусто.
+ */
+function driftFromKit(cfg) {
+  const out = { behind: [], edited: [] };
+  if (!cfg || !cfg.kit_dir) return out;
+  const text = p => fs.readFileSync(p, 'utf-8').split('\r\n').join('\n');
+  for (const sub of Object.keys(KIT_FILES)) {
+    for (const name of KIT_FILES[sub]) {
+      const mine = path.join(__dirname, '..', sub, name);
+      const theirs = path.join(cfg.kit_dir, sub, name);
+      try {
+        if (!fs.existsSync(theirs)) continue;
+        if (!fs.existsSync(mine)) { out.behind.push(sub + '/' + name); continue; }
+        if (text(mine) === text(theirs)) continue;
+        (fs.statSync(theirs).mtimeMs >= fs.statSync(mine).mtimeMs ? out.behind : out.edited).push(sub + '/' + name);
+      } catch (e) { /* не смогли прочитать — молчим */ }
+    }
+  }
+  return out;
+}
+
+module.exports = { loadConfig, slug, projectMemoryDir, samePath, inside, projectDir, isProject, driftFromKit,
+  KIT_FILES, HOOKS_ALIVE };
