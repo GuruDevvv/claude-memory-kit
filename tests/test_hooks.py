@@ -213,6 +213,18 @@ ctx = recall("subagent", {"session_id": sid, "cwd": os.path.join(proj, "src")})
 check("помощник получает записку проекта и команду поиска", "записка магазина" in ctx and "memory_search.py" in ctx
       and len(ctx) <= 3000, ctx[:300])
 settings = json.load(open(os.path.join(home, ".claude", "settings.json"), encoding="utf-8"))["hooks"]
+# Codex пропускает к модели немного текста хука: на старте приходит главное и адрес полного оглавления
+write(os.path.join(central, "MEMORY.md"), "# Оглавление\n\n## Всегда\n\n- говорить просто\n\n## Прочее\n\n"
+      + "- длинная строка правила номер такой-то\n" * 400)
+write(os.path.join(proj, "HANDOFF.md"), "# HANDOFF — Shop\nзаписка магазина\n" + "строка записки\n" * 600)
+ctx = start_hook(proj, ".codex")
+check("Codex: старт укладывается в потолок и несёт записку, «Всегда» и адрес оглавления",
+      len(ctx) <= 5900 and "записка магазина" in ctx and "говорить просто" in ctx
+      and "Прочитай его до начала работы" in ctx and "MEMORY.md" in ctx and "номер такой-то" not in ctx,
+      "%d %s" % (len(ctx), ctx[-300:]))
+ctx = start_hook(proj)
+check("Claude: старт без потолка, оглавление целиком", "номер такой-то" in ctx and len(ctx) > 10000, len(ctx))
+
 codex_hooks = json.load(open(os.path.join(home, ".codex", "hooks.json"), encoding="utf-8"))["hooks"]
 check("хуки момента прописаны у Claude и у Codex", "SubagentStart" in settings
       and any("memory-recall-hook.py prompt" in h["command"] for g in settings["UserPromptSubmit"] for h in g["hooks"])
@@ -223,7 +235,7 @@ check("хуки момента прописаны у Claude и у Codex", "Subag
 
 code, out = installer("--tool", "both", "--check")
 check("проверка установки проходит", code == 0, out[-600:])
-check("проверка смотрит метку и оглавление", "отдаёт метку" in out and "оглавление доходит" in out, out[-600:])
+check("проверка смотрит метку и оглавление", "отдаёт метку" in out and "доходит до агента" in out, out[-600:])
 check("проверка смотрит потолок Codex", "потолок Codex" in out, out[-600:])
 
 # отдельная проверка установки: та же, что после установки агентом по INSTALL.md

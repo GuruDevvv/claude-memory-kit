@@ -116,9 +116,23 @@ function clip(text, max, note) {
   return text.length > max ? text.slice(0, max) + '\n\n[...' + note + ']' : text;
 }
 
+// Раздел оглавления по заголовку второго уровня, вместе с заголовком; нет такого — пусто.
+function section(text, title) {
+  const m = text.replace(/\r\n/g, '\n').match(new RegExp('^## ' + title + '[^\\n]*\\n[\\s\\S]*?(?=^## |(?![\\s\\S]))', 'm'));
+  return m ? m[0].trim() : '';
+}
+
 try {
   const cfg = kit.loadConfig();
   if (!cfg) process.exit(0);
+
+  // Тесный режим (ключ start_max_chars): Codex пропускает к модели около 6,5 тыс. знаков вывода хука,
+  // середину вырезает (замер 14.10.2026: из 30 тыс. знаков дошло 6,6 тыс., раздел «Всегда» пропал).
+  // Тогда отдаём главное: записку, одну запись журнала, раздел «Всегда» и адрес полного оглавления.
+  const tight = parseInt(cfg.start_max_chars, 10) || 0;
+  const HANDOFF_MAX = tight ? Math.round(tight * 0.38) : HANDOFF_MAX_CHARS;
+  const JOURNAL_MAX = tight ? Math.round(tight * 0.16) : JOURNAL_MAX_CHARS;
+  const ALWAYS_MAX = Math.round(tight * 0.32);
 
   const cwd = process.cwd();
   const project = kit.projectDir(cfg, cwd);
@@ -138,7 +152,7 @@ try {
   if (fs.existsSync(handoffPath)) {
     const handoff = fs.readFileSync(handoffPath, 'utf-8').trim();
     parts.push('### HANDOFF.md' + (kit.samePath(project, cwd) ? '' : ' (' + handoffPath + ')') + '\n\n' +
-      clip(handoff, HANDOFF_MAX_CHARS, 'HANDOFF обрезан — открой HANDOFF.md полностью') + '\n');
+      clip(handoff, HANDOFF_MAX, 'HANDOFF обрезан — открой HANDOFF.md полностью') + '\n');
   }
   if (kit.isProject(cfg, project)) {
     const journalPath = path.join(cfg.central, 'projects', projectName + '.md');
@@ -147,11 +161,11 @@ try {
       const first = journal.search(/^## \[/m); // вступление файла пропускаем
       if (first >= 0) {
         const entries = journal.slice(first).split(/^## \[/m).filter(e => e.trim().length > 0);
-        const take = cfg.journal_entries || 3;
+        const take = tight ? 1 : (cfg.journal_entries || 3);
         const recent = entries.slice(0, take).map(e => '## [' + e.trim()).join('\n\n');
         if (recent) {
           parts.push('### Последние записи журнала (' + Math.min(take, entries.length) + ' из ' + entries.length + ')\n\n' +
-            clip(recent, JOURNAL_MAX_CHARS, 'журнал обрезан — открой projects/' + projectName + '.md') + '\n');
+            clip(recent, JOURNAL_MAX, 'журнал обрезан — открой projects/' + projectName + '.md') + '\n');
         }
       }
     }
@@ -165,7 +179,12 @@ try {
       if (seen.some(s => kit.samePath(s, file)) || !fs.existsSync(file)) return;
       seen.push(file);
       const text = fs.readFileSync(file, 'utf-8').trim();
-      if (text) {
+      if (text && tight) {
+        const always = seen.length === 1 ? section(text, 'Всегда') : '';
+        parts.push('### ' + title + '\n\n' + (always ? clip(always, ALWAYS_MAX, 'раздел обрезан') + '\n\n' : '') +
+          'Оглавление целиком сюда не поместилось (' + text.length + ' знаков). Прочитай его до начала работы: ' +
+          file.replace(/\\/g, '/') + '\n');
+      } else if (text) {
         parts.push('### ' + title + ' (' + dir + ')\n\n' +
           clip(text, INDEX_MAX_CHARS, 'оглавление обрезано — открой MEMORY.md и INDEX.md') + '\n');
       }
@@ -189,13 +208,10 @@ try {
 
   // Метку пишем всегда: по её отсутствию агент понимает, что хуки не запускаются
   // (в Codex — не подтверждены через /hooks), и сам говорит об этом человеку.
-  console.log(JSON.stringify({
-    hookSpecificOutput: {
-      hookEventName: 'SessionStart',
-      additionalContext: kit.HOOKS_ALIVE + '\n\n' + (parts.length === 0 ? '' :
-        '## Контекст проекта ' + projectName + ' (подгружено хуком начала сессии)\n\n' + parts.join('\n')),
-    },
-  }));
+  let out = kit.HOOKS_ALIVE + '\n\n' + (parts.length === 0 ? '' :
+    '## Контекст проекта ' + projectName + ' (подгружено хуком начала сессии)\n\n' + parts.join('\n'));
+  if (tight) out = clip(out, tight, 'дальше не поместилось');
+  console.log(JSON.stringify({ hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: out } }));
 } catch (e) {
   process.exit(0); // хук не мешает началу сессии
 }

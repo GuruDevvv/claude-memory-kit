@@ -45,7 +45,9 @@ CODEX_RULES_MAX = 32 * 1024                    # project_doc_max_bytes по ум
 
 TOOLS = {
     "claude": {"dir": ".claude", "hooks_file": "settings.json", "rules": "CLAUDE.md", "inject_project_index": False},
-    "codex": {"dir": ".codex", "hooks_file": "hooks.json", "rules": "AGENTS.md", "inject_project_index": True},
+    # start_max_chars: Codex пропускает к модели около 6,5 тыс. знаков вывода хука, остальное вырезает
+    "codex": {"dir": ".codex", "hooks_file": "hooks.json", "rules": "AGENTS.md", "inject_project_index": True,
+              "start_max_chars": 5800},
 }
 
 AUTOLOAD = {
@@ -405,6 +407,8 @@ def install(args):
         cfg = {"tool": tool, "root": root, "projects_dir": projects_dir, "central": central,
                "inject_index": True, "inject_project_index": spec["inject_project_index"],
                "sync_on_start": True, "journal_entries": 3}
+        if spec.get("start_max_chars"):
+            cfg["start_max_chars"] = spec["start_max_chars"]
         cfg_path = os.path.join(tool_dir, "memory-kit.json")
         if os.path.exists(cfg_path):                 # ручные правки настроек переживают переустановку
             try:
@@ -521,8 +525,10 @@ def check(args):
             line(r.returncode == 0 and HOOKS_ALIVE in ctx, "хук начала сессии отдаёт метку «%s»" % HOOKS_ALIVE)
             index = os.path.join(central, "MEMORY.md")
             if os.path.exists(index) and read(index).strip():
-                line(read(index).replace("\r\n", "\n").strip()[:200] in ctx.replace("\r\n", "\n"),
-                     "общее оглавление доходит до агента (контекст %d знаков)" % len(ctx))
+                # в тесном режиме (Codex) вместо оглавления приходит его адрес
+                line(read(index).replace("\r\n", "\n").strip()[:200] in ctx.replace("\r\n", "\n")
+                     or fwd(index) in ctx,
+                     "общее оглавление или его адрес доходит до агента (контекст %d знаков)" % len(ctx))
         if tool == "codex":
             for path in (rules, os.path.join(root, spec["rules"])):
                 if os.path.exists(path):
