@@ -66,6 +66,8 @@ def main():
         # архив разговоров — по пять законченных сессий за ход: не тормозит конец хода и за день забирает всё
         for script, args in (("memory_index.py", ["--all", "--quiet"]), ("project_index.py", ["--quiet"]),
                              ("session_archive.py", ["--max", "5", "--quiet"])):
+            if script == "project_index.py" and cfg.get("project_index") is False:
+                continue                     # список проектов собирает своё средство владельца
             code, out = run(script, args)
             if code != 0 and out:
                 problems.append(out)
