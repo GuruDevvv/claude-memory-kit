@@ -220,7 +220,8 @@ def sweep_codex(limit=None, dry=False):
             empty += 1
             continue
         slug = re.sub(r"[^A-Za-z0-9]", "-", cwd) or "codex"
-        dst = os.path.join(ARCHIVE, slug, "%s_%s.md" % (first[:10], sid[:8]))
+        # у Codex начало id — время: у сессий, начатых в одну минуту, оно общее, поэтому берём хвост
+        dst = os.path.join(ARCHIVE, slug, "%s_%s.md" % (first[:10], sid[-8:]))
         os.makedirs(os.path.dirname(dst), exist_ok=True)
         if old and old != dst and os.path.exists(old):
             os.remove(old)

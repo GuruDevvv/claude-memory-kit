@@ -123,10 +123,13 @@ codex("11111111-aaaa-bbbb-cccc-000000000001", "cli", [
     ("user", ["\n# Files mentioned by the user:\n\n## a.png: C:/tmp/a.png\n\n## My request for Codex:\nпочини оплату картой\n"]),
     ("assistant", ["Оплата падала из-за старого ключа, заменил."])])
 codex("22222222-aaaa-bbbb-cccc-000000000002", "exec", [("user", ["служебный вызов из скрипта"]), ("assistant", ["ответ"])])
+codex("11111111-aaaa-bbbb-cccc-000000000003", "vscode", [("user", ["вторая сессия той же минуты"]), ("assistant", ["да"])])
 done, empty = sa.sweep_codex()
-files = [f for f in os.listdir(os.path.join(sa.ARCHIVE, "E--Work-Shop")) if f.endswith("_11111111.md")]
+files = [f for f in os.listdir(os.path.join(sa.ARCHIVE, "E--Work-Shop")) if f.endswith("_00000001.md")]
 text = io.open(os.path.join(sa.ARCHIVE, "E--Work-Shop", files[0]), encoding="utf-8").read() if files else ""
-check("Codex: разговор с человеком в архиве, служебный вызов — нет", done == 1 and empty == 1 and len(files) == 1, f"{done} {empty} {files}")
+check("Codex: разговоры с человеком в архиве, служебный вызов — нет", done == 2 and empty == 1 and len(files) == 1, f"{done} {empty} {files}")
+check("Codex: сессии с общим началом id не затирают друг друга",
+      os.path.exists(os.path.join(sa.ARCHIVE, "E--Work-Shop", "2026-09-02_00000003.md")))
 check("Codex: есть просьба и ответ, нет правил, окружения и списка файлов",
       "почини оплату картой" in text and "старого ключа" in text and "Агент: Codex" in text
       and not any(x in text for x in ("AGENTS.md", "environment_context", "a.png", "служебная")), text)

@@ -53,6 +53,9 @@ PASS = [
     "git diff -a",
     "cat > msg.txt <<'EOF'\nне делать git add -A\nEOF\ngit commit -F msg.txt",
     "git add src/ -- tests/test_a.py",
+    "git add -- a.py && git commit -m x && grep -r слово . | wc -l",
+    "git add a.py; ls .",
+    "git commit -m x && python run.py --agent-dir here -a",
 ]
 for c in STOP:
     check("останавливает: " + c.replace("\n", " ⏎ "), bash(c) == "git_add_all")
