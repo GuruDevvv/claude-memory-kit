@@ -35,7 +35,8 @@ KIT = os.path.dirname(os.path.abspath(__file__))
 START, END = "<!-- memory-kit:start -->", "<!-- memory-kit:end -->"
 HOOK_FILES = ["kit.js", "session-start-context.js", "session-summary-check.js", "memory-index-hook.py",
               "memory-recall-hook.py"]
-SCRIPT_FILES = ["memory_index.py", "memory_search.py", "session_archive.py", "project_index.py", "find-zombies.ps1"]
+SCRIPT_FILES = ["memory_index.py", "memory_search.py", "session_archive.py", "project_index.py", "kit_check.py",
+                "find-zombies.ps1"]
 MEMORY_DIRS = ["feedback", "ref", "projects", "plans", "research", "reviews"]
 STAMP = time.strftime("%Y%m%d-%H%M%S")
 HOOKS_ALIVE = "memory-kit: хуки работают"      # та же строка — в hooks/kit.js
@@ -404,9 +405,9 @@ def install(args):
         if os.path.exists(cfg_path):                 # ручные правки настроек переживают переустановку
             try:
                 kept = json.loads(read(cfg_path))
-                for k in ("inject_index", "inject_project_index", "sync_on_start", "journal_entries"):
-                    if k in kept:
-                        cfg[k] = kept[k]
+                for k, v in kept.items():            # всё, кроме адресов: их задаёт этот запуск
+                    if k not in ("tool", "root", "projects_dir", "central"):
+                        cfg[k] = v
             except ValueError:
                 pass
         doer.write(cfg_path, dump_json(cfg), backup=False)

@@ -6,6 +6,7 @@
 import io
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -134,6 +135,50 @@ code, out = installer("--tool", "both", "--check")
 check("проверка установки проходит", code == 0, out[-600:])
 check("проверка смотрит метку и оглавление", "отдаёт метку" in out and "оглавление доходит" in out, out[-600:])
 check("проверка смотрит потолок Codex", "потолок Codex" in out, out[-600:])
+
+# отдельная проверка установки: та же, что после установки агентом по INSTALL.md
+def kit_check(tool, *args):
+    r = subprocess.run([sys.executable, os.path.join(home, tool, "scripts", "kit_check.py")] + list(args),
+                       capture_output=True, text=True, encoding="utf-8", errors="replace", env=env)
+    return r.returncode, r.stdout + r.stderr
+
+
+code, out = kit_check(".claude", "--kit", KIT)
+check("kit_check: чистая установка Claude проходит и сверена с набором", code == 0 and "совпадает с набором" in out, out[-900:])
+code, out = kit_check(".codex", "--kit", KIT)
+check("kit_check: чистая установка Codex проходит", code == 0, out[-900:])
+
+src = io.open(os.path.join(KIT, "install.py"), encoding="utf-8").read()
+chk = io.open(os.path.join(KIT, "scripts", "kit_check.py"), encoding="utf-8").read()
+names = lambda text, var: re.findall(r'"([^"]+)"', re.search(var + r" = \[(.*?)\]", text, re.S).group(1))
+check("kit_check и установщик знают один список файлов",
+      names(src, "HOOK_FILES") == names(chk, "HOOK_FILES") and names(src, "SCRIPT_FILES") == names(chk, "SCRIPT_FILES"))
+
+drift = os.path.join(home, ".claude", "scripts", "memory_search.py")
+keep_drift = io.open(drift, encoding="utf-8").read()
+write(drift, keep_drift + "\n# правка мимо набора\n")
+code, out = kit_check(".claude", "--kit", KIT)
+check("kit_check: файл поправили мимо набора — ловит", code != 0 and "[НЕТ] scripts/memory_search.py совпадает" in out, out[-900:])
+write(drift, keep_drift)
+
+sfile = os.path.join(home, ".claude", "settings.json")
+keep_settings = io.open(sfile, encoding="utf-8").read()
+write(sfile, keep_settings.replace("memory-recall-hook.py", "other-hook.py"))
+code, out = kit_check(".claude")
+check("kit_check: хук не прописан — ловит", code != 0 and "[НЕТ] PreToolUse" in out, out[-900:])
+write(sfile, keep_settings)
+
+# свои ключи настроек переживают переустановку
+cfile = os.path.join(home, ".claude", "memory-kit.json")
+cfg_now = json.load(io.open(cfile, encoding="utf-8"))
+cfg_now.update({"recall_block": False, "sessions_dir": "D:/archive", "kit_dir": KIT})
+write(cfile, json.dumps(cfg_now, ensure_ascii=False, indent=2))
+installer("--tool", "claude")
+cfg_after = json.load(io.open(cfile, encoding="utf-8"))
+check("переустановка не теряет свои ключи настроек", cfg_after.get("recall_block") is False
+      and cfg_after.get("sessions_dir") == "D:/archive" and cfg_after.get("kit_dir") == KIT, str(cfg_after))
+code, out = kit_check(".claude")
+check("kit_check берёт папку набора из настроек", code == 0 and "сверка с набором" in out, out[-900:])
 
 # пустой ответ хука — провал проверки
 hook = os.path.join(home, ".claude", "hooks", "session-start-context.js")

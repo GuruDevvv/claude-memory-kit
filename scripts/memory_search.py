@@ -181,7 +181,8 @@ def session_docs(archive):
             continue
         rel = os.path.relpath(path, archive).replace(os.sep, "/")
         project = re.search(r"(?m)^Проект: (.*)$", text)
-        project = os.path.basename(project.group(1).strip().rstrip("\\/")) if project else "?"
+        # архив могли собрать на другой системе: режем по обоим разделителям
+        project = re.split(r"[\\/]", project.group(1).strip().rstrip("\\/"))[-1] if project else "?"
         blocks = re.split(r"(?m)^(?=## \[)", text)[1:]
         i = 0
         while i < len(blocks):
