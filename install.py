@@ -406,7 +406,8 @@ def install(args):
             doer.copy(os.path.join(KIT, "scripts", name), os.path.join(tool_dir, "scripts", name))
         cfg = {"tool": tool, "root": root, "projects_dir": projects_dir, "central": central,
                "inject_index": True, "inject_project_index": spec["inject_project_index"],
-               "sync_on_start": True, "journal_entries": 3}
+               "sync_on_start": True, "journal_entries": 3,
+               "kit_dir": fwd(KIT)}           # по нему хук начала сессии и kit_check сверяют установку с набором
         if spec.get("start_max_chars"):
             cfg["start_max_chars"] = spec["start_max_chars"]
         cfg_path = os.path.join(tool_dir, "memory-kit.json")
