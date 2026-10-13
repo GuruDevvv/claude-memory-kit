@@ -140,6 +140,25 @@ check("журнал: в записи есть проект и файлы пра�
       and "push origin" not in json.dumps(events), str(events[:2]))
 check("журнал: повтор темы в той же сессии не пишется", kinds.count(("recall", "commit")) == 2, str(kinds))
 
+# журнал не растёт без конца: старые части удаляются
+import importlib.util
+spec = importlib.util.spec_from_file_location("ms_inst", os.path.join(home, ".claude", "scripts", "memory_search.py"))
+ms_inst = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(ms_inst)
+mdir = os.path.join(central, ".metrics")
+for stamp in ("20260101-000000", "20260102-000000", "20260103-000000", "20260104-000000"):
+    write(os.path.join(mdir, "events.%s.jsonl" % stamp), "{}\n")
+ms_inst.METRICS_MAX_BYTES, ms_inst.METRICS_KEEP_FILES = 10, 2
+ms_inst.log_event("search", project="Shop")
+parts = sorted(f for f in os.listdir(mdir) if f.startswith("events."))
+check("журнал: при переполнении остаются текущий файл и две последние части",
+      len(parts) == 3 and "events.jsonl" in parts and "events.20260101-000000.jsonl" not in parts, str(parts))
+kept = [f for f in parts if f != "events.jsonl"][-1]
+os.replace(os.path.join(mdir, kept), os.path.join(mdir, "events.jsonl"))      # вернуть записи для проверок ниже
+for f in os.listdir(mdir):
+    if re.match(r"events\.\d", f):
+        os.remove(os.path.join(mdir, f))
+
 # тема есть, правил нет: отметка «показали» не ставится, пустой показ виден в журнале
 empty_cfg = os.path.join(home, ".claude", "memory-kit.json")
 keep_cfg = io.open(empty_cfg, encoding="utf-8").read()

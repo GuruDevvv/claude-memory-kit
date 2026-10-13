@@ -21,13 +21,20 @@ import argparse
 import collections
 import datetime
 import glob
+import hashlib
 import json
 import os
 import re
+import shutil
+import subprocess
 import sys
+import tempfile
 
 BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 MIN_REPLICAS = 30
+CONTEXT_CHARS = 250         # сколько знаков конца ответа агента показывать модели перед репликой
+BATCH = 40                  # реплик в одном обращении к модели
+KINDS = ("нет", "поправка", "повтор")
 LONG_REPLICA = 800          # длиннее — это постановка задачи или вставленный текст, а не поправка
 
 # Признаки поправки: основы и обороты. Проверять глазами через --examples после любой правки списка.
@@ -68,26 +75,133 @@ def replicas(archive, root):
         project = m.group(1).strip() if m else ""
         if root and not os.path.normcase(project.replace("/", os.sep)).startswith(root):
             continue
-        first = True
+        first, before = True, ""
         for block in re.split(r"(?m)^(?=## \[)", text)[1:]:
             head = re.match(r"## \[(\d{4}-\d{2}-\d{2})[^\]]*\] (\S+)\n", block)
-            if not head or head.group(2) != "человек":
+            if not head:
+                continue
+            body = block[head.end():].strip()
+            if head.group(2) != "человек":
+                before = body or before          # на что человек отвечает: конец последнего ответа агента
                 continue
             if first:
                 first = False
                 continue
-            body = block[head.end():].strip()
             if body:
-                yield datetime.date.fromisoformat(head.group(1)), re.split(r"[\\/]", project.rstrip("\\/"))[-1], body
+                yield (datetime.date.fromisoformat(head.group(1)), re.split(r"[\\/]", project.rstrip("\\/"))[-1],
+                       body, re.sub(r"\s+", " ", before)[-CONTEXT_CHARS:])
 
 
 def is_correction(text):
     return len(text) <= LONG_REPLICA and bool(MARKER_RE.search(text))
 
 
+def rid(text):
+    """Имя реплики в файле разметки: по тексту, чтобы та же реплика не размечалась дважды."""
+    return hashlib.sha1(re.sub(r"\s+", " ", text).strip().encode("utf-8")).hexdigest()[:16]
+
+
+def load_labels(central):
+    out = {}
+    try:
+        with open(os.path.join(central, ".metrics", "labels.jsonl"), encoding="utf-8") as fh:
+            for line in fh:
+                try:
+                    row = json.loads(line)
+                    out[row["id"]] = row["k"]
+                except (ValueError, KeyError):
+                    pass
+    except OSError:
+        pass
+    return out
+
+
+LABEL_PROMPT = """Ниже реплики человека, который работает с ИИ-агентом. Перед каждой — конец ответа агента, на который человек отвечает.
+Для каждой реплики реши, поправляет ли человек агента.
+
+- "повтор" — человек поправляет и при этом говорит или даёт понять, что уже просил, говорил или объяснял это раньше.
+- "поправка" — человек недоволен тем, что агент сделал или написал: сделал не то, понял не так, ошибся в факте, написал непонятно или слишком длинно, нарушил договорённость.
+- "нет" — всё остальное: новая задача, вопрос, уточнение, согласие, ответ на вопрос агента, вопрос «почему» про мир, а не упрёк агенту.
+
+Сомневаешься — "нет". Ответ: только массив JSON, по одному объекту на реплику, в том же порядке, без пояснений.
+Образец ответа на три реплики:
+[{"n": 1, "k": "нет"}, {"n": 2, "k": "поправка"}, {"n": 3, "k": "повтор"}]
+
+Реплики:
+"""
+
+
+def ask_model(batch, command):
+    """Разметка пачки одной короткой сессией Claude Code без хуков, правил и инструментов.
+    Возвращает список меток той же длины или None."""
+    lines = []
+    for n, (_, _, text, before) in enumerate(batch, 1):
+        lines.append("%d.\nагент до этого: …%s\nчеловек: %s\n" % (n, before or "(нет)", re.sub(r"\s+", " ", text)))
+    try:
+        r = subprocess.run(command + ["-p", "--model", "haiku", "--no-session-persistence", "--setting-sources", "",
+                                      "--strict-mcp-config", "--disable-slash-commands", "--tools", "",
+                                      "--system-prompt", "Ты размечаешь реплики. Отвечаешь только массивом JSON."],
+                           input=LABEL_PROMPT + "\n".join(lines), capture_output=True, text=True, encoding="utf-8",
+                           errors="replace", timeout=300, cwd=tempfile.gettempdir())
+        m = re.search(r"\[.*\]", r.stdout, re.S)
+        rows = json.loads(m.group(0)) if m else None
+    except Exception:
+        return None
+    if not isinstance(rows, list) or len(rows) != len(batch):
+        return None
+    out = [str(x.get("k", "")).strip().lower() if isinstance(x, dict) else "" for x in rows]
+    return out if all(k in KINDS for k in out) else None
+
+
+def label(rows, central, limit, command):
+    """Разметить ещё не размеченные реплики. Каждая размечается один раз, итог дописывается в labels.jsonl."""
+    done = load_labels(central)
+    todo = [r for r in rows if len(r[2]) <= LONG_REPLICA and rid(r[2]) not in done]
+    todo = list({rid(r[2]): r for r in todo}.values())[:limit]
+    if not todo:
+        print("разметка: новых реплик нет")
+        return 0
+    folder = os.path.join(central, ".metrics")
+    os.makedirs(folder, exist_ok=True)
+    ok = failed = 0
+    with open(os.path.join(folder, "labels.jsonl"), "a", encoding="utf-8", newline="\n") as fh:
+        for i in range(0, len(todo), BATCH):
+            batch = todo[i:i + BATCH]
+            kinds = ask_model(batch, command)
+            if kinds is None:
+                failed += len(batch)
+                continue
+            for (day, _, text, _), k in zip(batch, kinds):
+                fh.write(json.dumps({"id": rid(text), "k": k, "day": day.isoformat()}, ensure_ascii=False) + "\n")
+            fh.flush()
+            ok += len(batch)
+            print("разметка: %d из %d" % (ok, len(todo)), flush=True)
+    print("разметка: готово %d, не удалось %d (эти пойдут в следующий запуск)" % (ok, failed))
+    return 0 if ok or not failed else 1
+
+
+def labeled_table(rows, labels, weeks):
+    total, fix, again, unknown = (collections.Counter() for _ in range(4))
+    for day, _, text, _ in rows:
+        w = week_of(day)
+        k = labels.get(rid(text)) if len(text) <= LONG_REPLICA else "нет"
+        if k is None:
+            unknown[w] += 1
+            continue
+        total[w] += 1
+        fix[w] += k in ("поправка", "повтор")
+        again[w] += k == "повтор"
+    out = []
+    for w in sorted(set(total) | set(unknown))[-weeks:]:
+        enough = total[w] >= MIN_REPLICAS
+        out.append((w.isoformat(), total[w], fix[w], "%.1f" % (100.0 * fix[w] / total[w]) if enough else "мало данных",
+                    again[w], "%.1f" % (100.0 * again[w] / total[w]) if enough else "мало данных", unknown[w]))
+    return out
+
+
 def corrections_table(rows, weeks):
     total, bad = collections.Counter(), collections.Counter()
-    for day, _, text in rows:
+    for day, _, text, _ in rows:
         w = week_of(day)
         total[w] += 1
         bad[w] += 1 if is_correction(text) else 0
@@ -144,6 +258,8 @@ def main():
     ap.add_argument("--weeks", type=int, default=8)
     ap.add_argument("--examples", type=int, default=0, help="показать столько реплик, засчитанных как поправка")
     ap.add_argument("--write", action="store_true", help="записать в <общая память>/reviews/metrics.md")
+    ap.add_argument("--label", action="store_true", help="разметить новые реплики моделью (нужен Claude Code)")
+    ap.add_argument("--max", type=int, default=400, help="сколько реплик разметить за запуск")
     ap.add_argument("--archive", help="папка архива разговоров")
     ap.add_argument("--central", help="папка общей памяти")
     a = ap.parse_args()
@@ -154,11 +270,31 @@ def main():
         print("memory_report: нет настроек memory-kit.json, укажи --central и --archive")
         return 1
 
-    rows = list(dict.fromkeys(replicas(archive, cfg.get("root"))))     # продолженная сессия даёт те же реплики дважды
+    seen, rows = set(), []
+    for r in replicas(archive, cfg.get("root")):         # продолженная сессия даёт те же реплики дважды
+        if r[:3] not in seen:
+            seen.add(r[:3])
+            rows.append(r)
+    if a.label:
+        exe = shutil.which("claude")
+        if not exe:
+            print("разметка: не найдена команда claude. Разметку делает Claude Code, без него остаётся счёт по словам.")
+            return 1
+        code = label(rows, central, a.max, [exe])
+        if not a.write:
+            return code                       # с --write после разметки сразу обновляется файл отчёта
+    labels = load_labels(central)
     parts = ["# Память: отчёт на %s" % datetime.date.today().isoformat(), "",
              "## Поправки человека, на 100 его реплик", "",
-             "Реплик всего: %d. Первая реплика сессии и реплики длиннее %d знаков поправкой не считаются." % (len(rows), LONG_REPLICA),
-             "", table(["Неделя с", "Реплик", "Поправок", "На 100 реплик"], corrections_table(rows, a.weeks))]
+             "Реплик всего: %d. Первая реплика сессии и реплики длиннее %d знаков поправкой не считаются." % (len(rows), LONG_REPLICA), ""]
+    if labels:
+        parts += ["Размечено моделью, каждая реплика один раз (`--label`). «Повтор» — человек поправляет и говорит, "
+                  "что уже просил об этом раньше: это прямой счёт того, что память не удержала.", "",
+                  table(["Неделя с", "Реплик", "Поправок", "На 100", "Из них повторов", "Повторов на 100", "Не размечено"],
+                        labeled_table(rows, labels, a.weeks))]
+    else:
+        parts += ["Разметки моделью нет (`--label`), ниже грубый счёт по словам: годится только как сигнал «стало резко хуже».", "",
+                  table(["Неделя с", "Реплик", "Поправок", "На 100 реплик"], corrections_table(rows, a.weeks))]
     events = events_of(central)
     parts += ["", "## Срабатывания памяти", ""]
     if events:
@@ -179,11 +315,11 @@ def main():
     else:
         print(text)
     if a.examples:
-        found = [(d, p, t) for d, p, t in rows if is_correction(t)]
+        found = [(d, p, t) for d, p, t, _ in rows if (labels.get(rid(t)) in ("поправка", "повтор") if labels else is_correction(t))]
         found.sort(reverse=True)
         print("## Примеры реплик, засчитанных как поправка (%d из %d)\n" % (min(a.examples, len(found)), len(found)))
         for d, p, t in found[:a.examples]:
-            print("- %s %s: %s" % (d.isoformat(), p, re.sub(r"\s+", " ", t)[:220]))
+            print("- %s %s [%s]: %s" % (d.isoformat(), p, labels.get(rid(t), "слова"), re.sub(r"\s+", " ", t)[:220]))
     return 0
 
 

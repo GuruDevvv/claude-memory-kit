@@ -52,6 +52,26 @@ def run(script, args):
     return r.returncode, (r.stdout + r.stderr).strip()
 
 
+def label_in_background():
+    """Раз в сутки размечает новые реплики человека (поправка или нет) и обновляет отчёт reviews/metrics.md.
+    Отдельным процессом, чтобы не задерживать конец хода. Тратит лимит Claude, поэтому включается
+    только ключом "label": true."""
+    import tempfile
+    import time
+    flag = os.path.join(tempfile.gettempdir(), "memory-kit-labeled-" + time.strftime("%Y%m%d"))
+    if os.path.exists(flag):
+        return
+    try:
+        open(flag, "w").close()
+        flags = 0x00000008 | 0x00000200 | 0x08000000 if os.name == "nt" else 0     # без окна и без связи с хуком
+        subprocess.Popen([sys.executable, os.path.join(SCRIPTS, "memory_report.py"), "--label", "--max", "200", "--write"],
+                         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                         creationflags=flags, close_fds=True, env=dict(os.environ, PYTHONIOENCODING="utf-8"),
+                         **({} if os.name == "nt" else {"start_new_session": True}))
+    except Exception:
+        pass
+
+
 def main():
     cfg = config()
     if not cfg:
@@ -71,6 +91,8 @@ def main():
             code, out = run(script, args)
             if code != 0 and out:
                 problems.append(out)
+        if cfg.get("label") is True:
+            label_in_background()
     else:
         d = memory_dir((data.get("tool_input") or {}).get("file_path") or "", cfg["projects_dir"], cfg.get("central"))
         if not d:

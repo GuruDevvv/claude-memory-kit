@@ -72,6 +72,7 @@ def sessions_dir():
 
 
 METRICS_MAX_BYTES = 1024 * 1024
+METRICS_KEEP_FILES = 5          # вместе с текущим файлом это потолок около 6 МБ
 
 
 def log_event(event, **fields):
@@ -89,6 +90,9 @@ def log_event(event, **fields):
         path = os.path.join(folder, "events.jsonl")
         if os.path.exists(path) and os.path.getsize(path) > METRICS_MAX_BYTES:
             os.replace(path, os.path.join(folder, "events.%s.jsonl" % time.strftime("%Y%m%d-%H%M%S")))
+            old = sorted(f for f in os.listdir(folder) if re.match(r"events\.\d{8}-\d{6}\.jsonl$", f))
+            for name in old[:-METRICS_KEEP_FILES]:           # журнал не растёт без конца: держим последние части
+                os.remove(os.path.join(folder, name))
         row = {"ts": time.strftime("%Y-%m-%dT%H:%M:%S"), "tool": cfg.get("tool"), "event": event}
         row.update({k: v for k, v in fields.items() if v not in (None, "", [])})
         with open(path, "a", encoding="utf-8", newline="\n") as fh:
