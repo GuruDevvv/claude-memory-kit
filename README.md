@@ -98,6 +98,8 @@ python scripts/memory_report.py --weeks 8
 
 Добавьте `--write`, чтобы сохранить отчёт в `reviews/metrics.md` внутри общей памяти.
 
+## Где что лежит
+
 ```
 ~/.agent-memory/central/            общая память, одна на все проекты
 ├── MEMORY.md                       оглавление — собирает скрипт
