@@ -39,8 +39,23 @@ GROUPS = [
      "block": r"\bgit\s+(?:-[Cc]\s+\S+\s+)*push\b|\bgh\s+(?:pr|release)\s+(?:create|merge)",
      "moments": ["коммич", "публик", "git"], "query": "git коммит пуш публикация add"},
     {"key": "server", "title": "сервер и выкатка",
-     "pattern": r"(?:^|[\s;&|(])(?:ssh|scp|rsync|sftp)\s+\S|\bpm2\s+\w|\bsystemctl\s+(?:restart|stop|start|reload)|\bdocker\s+(?:compose|exec|run)\b",
+     # docker здесь нет: местный контейнер — не сервер, а на сервере он идёт внутри ssh (ложная остановка 13.10.2026)
+     "pattern": r"(?:^|[\s;&|(])(?:ssh|scp|rsync|sftp)\s+\S|\bpm2\s+\w|\bsystemctl\s+(?:restart|stop|start|reload)",
      "block": r".", "moments": ["депло", "сервер", "выкат"], "query": "сервер ssh деплой выкатка pm2"},
+]
+
+# Запреты: то, что правило требует всегда и что можно проверить по самой команде. Правило в тексте агент
+# забывает, отказ хука — нет. Свои запреты — ключом "guards" в memory-kit.json, выключатель — "guard": false
+# целиком или {"<key>": false} по одному.
+#   tool — по имени инструмента; pattern — по тексту команды (кавычки вырезаны, чтобы не ловить слова
+#   из сообщения коммита); require + when_text — у инструмента должно быть поле с таким значением,
+#   если в его тексте встречается when_text.
+GUARDS = [
+    {"key": "git_add_all", "tool": r"^(?:Bash|PowerShell|shell)$",
+     "pattern": r"(?:^|[;&|(]\s*|\n\s*)git\s+(?:-[Cc]\s+\S+\s+)*(?:add\s+(?:\S+\s+)*(?:-A|--all|\.)(?=\s|$|[;&|)])"
+                r"|commit\s+(?:\S+\s+)*-[a-z]*a[a-z]*(?=\s|$))",
+     "message": "Остановлено: `git add -A`, `git add .` и `git commit -a` берут всё подряд, в том числе чужие "
+                "и секретные файлы. Посмотри `git status` и добавь свои файлы поимённо."},
 ]
 
 
@@ -59,8 +74,9 @@ def config():
         return {}
 
 
-def seen_before(session, key):
-    """Тему в этой сессии уже подсказывали? Отметка — в папке временных файлов, сама устаревает за сутки."""
+def seen_before(session, key, mark=True):
+    """Тему в этой сессии уже подсказывали? Отметка — в папке временных файлов, сама устаревает за сутки.
+    mark=False только спрашивает: отметку ставим после того, как правила нашлись и ушли агенту."""
     path = os.path.join(tempfile.gettempdir(), "memory-kit-recall-%s.json" % re.sub(r"[^A-Za-z0-9_-]", "", session or "x"))
     try:
         data = json.load(open(path, encoding="utf-8")) if time.time() - os.path.getmtime(path) < 86400 else {}
@@ -68,6 +84,8 @@ def seen_before(session, key):
         data = {}
     if key in data:
         return True
+    if not mark:
+        return False
     data[key] = int(time.time())
     try:
         with open(path, "w", encoding="utf-8") as fh:
@@ -75,6 +93,56 @@ def seen_before(session, key):
     except OSError:
         pass
     return False
+
+
+def project_name(data, cfg):
+    cwd = data.get("cwd") or os.getcwd()
+    return os.path.basename(project_dir(cwd, cfg.get("root") or ROOT_FALLBACK) or cwd)
+
+
+def note(data, cfg, event, **fields):
+    """Запись в журнал срабатываний; сам журнал ведёт memory_search.log_event."""
+    try:
+        load("memory_search").log_event(event, session=(data.get("session_id") or "")[:8],
+                                        project=project_name(data, cfg), **fields)
+    except Exception:
+        pass
+
+
+def strip_quoted(command):
+    """Команда без содержимого кавычек и встроенных текстов: запрет не должен ловить слова из сообщения коммита."""
+    command = re.sub(r"<<-?\s*['\"]?(\w+)['\"]?.*?^\s*\1\s*$", " ", command, flags=re.S | re.M)
+    return re.sub(r"\"(?:\\.|[^\"\\])*\"|'[^']*'", '""', command)
+
+
+def guard(data, cfg):
+    """Первый сработавший запрет: (key, сообщение) или None."""
+    switch = cfg.get("guard", True)
+    if switch is False:
+        return None
+    tool = data.get("tool_name") or ""
+    ti = data.get("tool_input") or {}
+    command = strip_quoted(ti.get("command") or "")
+    for g in GUARDS + list(cfg.get("guards") or []):
+        try:
+            if isinstance(switch, dict) and switch.get(g["key"]) is False:
+                continue
+            if g.get("tool") and not re.search(g["tool"], tool, re.I):
+                continue
+            if g.get("pattern") and not re.search(g["pattern"], command, re.I | re.M):
+                continue
+            if g.get("require"):
+                text = " ".join(str(v) for v in ti.values() if isinstance(v, str))
+                if g.get("when_text") and not re.search(g["when_text"], text, re.I):
+                    continue
+                if all(str(ti.get(k, "")).lower() == str(v).lower() for k, v in g["require"].items()):
+                    continue
+            elif not g.get("pattern"):
+                continue                      # запрет без условия не срабатывает никогда
+            return g["key"], g.get("message") or "Остановлено правилом «%s»." % g["key"]
+        except Exception:
+            continue
+    return None
 
 
 def int_of(v):
@@ -117,6 +185,10 @@ def clean(line):
 
 
 def pre(data, cfg):
+    hit = guard(data, cfg)
+    if hit:
+        note(data, cfg, "guard", key=hit[0], blocked=True)
+        return "deny", hit[1]
     command = (data.get("tool_input") or {}).get("command") or ""
     if not command:
         return None
@@ -128,12 +200,16 @@ def pre(data, cfg):
     # такую команду один раз за сессию останавливаем, правила уходят причиной отказа, повтор проходит.
     stop = bool(group.get("block")) and re.search(group["block"], command, re.I | re.M) \
         and cfg.get("recall_block", True)
-    if seen_before(data.get("session_id"), group["key"] + (":block" if stop else "")):
-        return None
+    mark = group["key"] + (":block" if stop else "")
+    if seen_before(data.get("session_id"), mark, mark=False):
+        return None                           # в журнал не пишем: повтор темы в той же сессии — не событие
     ms = load("memory_search")
     rows = pick(ms, group, command, ms.memory_dirs(data.get("cwd") or os.getcwd(), False, None))
     if not rows:
+        note(data, cfg, "recall_empty", key=group["key"])      # тема была, правил не нашлось: дыра в памяти
         return None
+    seen_before(data.get("session_id"), mark)  # отметку ставим, только когда есть что показать
+    note(data, cfg, "recall", key=group["key"], blocked=bool(stop) or None, files=[r[1] for r in rows])
     lines = ["Память, тема «%s» — правила, которые ты уже записывал:" % group.get("title", group["key"])]
     for _, rel, title, _ in rows:
         lines.append("- %s (%s)" % (clean(title), rel))
@@ -184,6 +260,7 @@ def subagent(data, cfg):
         parts.append("Записка проекта %s (%s):\n%s" % (os.path.basename(proj), os.path.join(proj, "HANDOFF.md"),
                      text[:HANDOFF_CHARS] + ("\n[…обрезано, открой файл]" if len(text) > HANDOFF_CHARS else "")))
     text = "memory-kit: память для помощника\n\n" + "\n\n".join(parts)
+    note(data, cfg, "subagent")
     return "SubagentStart", text[:SUBAGENT_MAX_CHARS]
 
 

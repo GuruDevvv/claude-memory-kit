@@ -123,6 +123,60 @@ check("первая команда на сервер остановлена; п�
       ctx.startswith("ОТКАЗ") and "pm2 руками" in ctx, ctx[:300])
 check("чтение без подсказки", recall("pre", {"session_id": sid + "b", "cwd": proj,
                                               "tool_input": {"command": "git status && git log -3 && ls"}}) == "")
+ctx = recall("pre", {"session_id": sid, "cwd": proj, "tool_name": "Bash", "tool_input": {"command": "git add -A"}})
+check("запрет: git add -A остановлен, и каждый раз", ctx.startswith("ОТКАЗ") and "поимённо" in ctx
+      and recall("pre", {"session_id": sid, "cwd": proj, "tool_name": "Bash",
+                         "tool_input": {"command": "git add ."}}).startswith("ОТКАЗ"), ctx[:200])
+check("docker на своей машине — не сервер", recall("pre", {"session_id": sid + "d", "cwd": proj, "tool_name": "Bash",
+      "tool_input": {"command": "docker run --rm python:3.11-slim python -V"}}) == "")
+
+# журнал срабатываний
+events = [json.loads(x) for x in io.open(os.path.join(central, ".metrics", "events.jsonl"), encoding="utf-8")]
+kinds = [(e["event"], e.get("key")) for e in events]
+check("журнал: показ правил, остановка и запрет записаны", ("recall", "commit") in kinds and ("recall", "server") in kinds
+      and ("guard", "git_add_all") in kinds, str(kinds))
+check("журнал: в записи есть проект и файлы правил, текста команды нет",
+      all(e.get("project") == "Shop" for e in events) and any("feedback/feedback_commit.md" in (e.get("files") or []) for e in events)
+      and "push origin" not in json.dumps(events), str(events[:2]))
+check("журнал: повтор темы в той же сессии не пишется", kinds.count(("recall", "commit")) == 2, str(kinds))
+
+# тема есть, правил нет: отметка «показали» не ставится, пустой показ виден в журнале
+empty_cfg = os.path.join(home, ".claude", "memory-kit.json")
+keep_cfg = io.open(empty_cfg, encoding="utf-8").read()
+cfg_x = json.loads(keep_cfg)
+cfg_x["recall"] = [{"key": "deploy_x", "pattern": "kubectl", "query": "кубернетес которого нет", "moments": ["нет такого раздела"]}]
+write(empty_cfg, json.dumps(cfg_x, ensure_ascii=False))
+recall("pre", {"session_id": sid, "cwd": proj, "tool_name": "Bash", "tool_input": {"command": "kubectl apply"}})
+mark = os.path.join(tempfile.gettempdir(), "memory-kit-recall-%s.json" % re.sub(r"[^A-Za-z0-9_-]", "", sid))
+events = [json.loads(x) for x in io.open(os.path.join(central, ".metrics", "events.jsonl"), encoding="utf-8")]
+check("правил по теме нет: в журнале пустой показ, отметки «показали» нет",
+      events[-1]["event"] == "recall_empty" and "deploy_x" not in io.open(mark, encoding="utf-8").read(), str(events[-1]))
+write(empty_cfg, keep_cfg)
+
+# конец сессии без «Промпта»
+U = lambda text: {"type": "user", "message": {"role": "user", "content": text}}
+A = lambda text: {"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": text}]}}
+TOOL = {"type": "user", "message": {"role": "user", "content": [{"type": "tool_result", "content": "ok"}]}}
+
+
+def ritual(lines, **extra):
+    t = os.path.join(box, "transcript.jsonl")
+    write(t, "\n".join(json.dumps(x, ensure_ascii=False) for x in lines) + "\n")
+    r = subprocess.run(["node", os.path.join(home, ".claude", "hooks", "session-summary-check.js")], cwd=proj,
+                       input=json.dumps(dict({"transcript_path": t, "session_id": "s1"}, **extra)),
+                       capture_output=True, text=True, encoding="utf-8", errors="replace")
+    return '"decision":"block"' in r.stdout
+
+
+check("«стоп» без раздела «Промпт»: конец хода остановлен", ritual([U("привет"), A("да"), U("стоп"), A("сохраняю"), TOOL, A("Готово.")]))
+check("«Стоп.» с точкой и большой буквы — тоже", ritual([U("Стоп."), A("Готово.")]))
+check("«стоп» и раздел «Промпт» в ответе: пропускает", not ritual([U("стоп"), A("Итог\n\n## Промпт\n> продолжи")]))
+check("слово внутри фразы концом сессии не считается", not ritual([U("пока не трогай это"), A("хорошо")]))
+check("обычный ход не трогает", not ritual([U("сделай кнопку"), A("сделал")]))
+check("второй раз подряд не держит", not ritual([U("стоп"), A("Готово.")], stop_hook_active=True))
+check("служебная вставка в сообщении человека не мешает",
+      ritual([U("стоп\n<system-reminder>что-то служебное</system-reminder>"), A("Готово.")]))
+
 ctx = recall("subagent", {"session_id": sid, "cwd": os.path.join(proj, "src")})
 check("помощник получает записку проекта и команду поиска", "записка магазина" in ctx and "memory_search.py" in ctx
       and len(ctx) <= 3000, ctx[:300])

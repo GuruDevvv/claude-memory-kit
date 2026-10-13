@@ -54,7 +54,7 @@
 | Откуда | Куда | Файлы |
 |---|---|---|
 | `hooks/` | `<папка агента>/hooks/` | `kit.js`, `session-start-context.js`, `session-summary-check.js`, `memory-index-hook.py`, `memory-recall-hook.py` |
-| `scripts/` | `<папка агента>/scripts/` | `memory_index.py`, `memory_search.py`, `session_archive.py`, `project_index.py`, `kit_check.py`, `find-zombies.ps1` |
+| `scripts/` | `<папка агента>/scripts/` | `memory_index.py`, `memory_search.py`, `session_archive.py`, `project_index.py`, `kit_check.py`, `memory_report.py`, `find-zombies.ps1` |
 
 Файл с таким именем уже лежит и отличается? Это своя версия человека. Сохрани копию, сравни
 с файлом набора и выпиши, что в ней есть сверх набора. Каждое отличие покажи человеку: либо оно
@@ -90,6 +90,10 @@
 | `project_index` | `false`: список проектов `PROJECT_INDEX.md` в конце хода не собирать. Нужно, если его уже ведёт другое средство |
 | `recall_block` | `false` выключает остановку перед первым пушем и первой командой на сервер |
 | `recall` | свои темы и признаки для подсказки правил, формат в начале `hooks/memory-recall-hook.py` |
+| `guard` | запреты: хук останавливает `git add -A`, `git add .`, `git commit -a` и конец сессии без раздела «Промпт» после слова «стоп». `false` выключает все, `{"git_add_all": false}` или `{"end_prompt": false}` по одному |
+| `guards` | свои запреты, формат в начале `hooks/memory-recall-hook.py`. Запрет на другой инструмент требует ещё и строки в хуках: `PreToolUse` с именем этого инструмента и той же командой `memory-recall-hook.py pre` |
+| `stop_words` | слова, которыми человек заканчивает сессию. По умолчанию: стоп, всё, завершай, пока, stop |
+| `metrics` | `false` выключает журнал срабатываний `<central>/.metrics/events.jsonl`. В него пишется, какие правила показаны и что остановлено; текста команд там нет. Сводка по неделям: `scripts/memory_report.py` |
 
 При обновлении файл не переписывай: добавь недостающие ключи, остальное оставь.
 

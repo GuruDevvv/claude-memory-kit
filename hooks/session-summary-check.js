@@ -22,15 +22,84 @@ function readStdin() {
   }
 }
 
+const STOP_WORDS = ['стоп', 'всё', 'все', 'завершай', 'пока', 'stop'];
+const TAIL_BYTES = 600000;
+
+/** Текст сообщения: строка либо склейка текстовых частей; служебные вставки вырезаны. */
+function textOf(entry) {
+  const c = entry && entry.message && entry.message.content;
+  const raw = typeof c === 'string' ? c
+    : Array.isArray(c) ? c.filter(x => x && x.type === 'text').map(x => x.text || '').join('\n') : '';
+  return raw.replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, '').trim();
+}
+
+/**
+ * Человек сказал «стоп», а в ответе агента нет раздела «Промпт» — ритуал конца сессии не доведён.
+ * Смотрим хвост записи сессии: последнее сообщение человека и всё, что агент написал после него.
+ * Запись не читается или устроена иначе (другой агент) — молчим.
+ */
+function endRitualMissing(input, cfg) {
+  if (cfg.guard === false || (cfg.guard && cfg.guard.end_prompt === false)) return false;
+  if (input.stop_hook_active || !input.transcript_path) return false;   // второй раз не держим: петли не будет
+  let tail;
+  try {
+    const size = fs.statSync(input.transcript_path).size;
+    const fd = fs.openSync(input.transcript_path, 'r');
+    const buf = Buffer.alloc(Math.min(size, TAIL_BYTES));
+    fs.readSync(fd, buf, 0, buf.length, size - buf.length);
+    fs.closeSync(fd);
+    tail = buf.toString('utf-8');
+  } catch (e) {
+    return false;
+  }
+  const entries = [];
+  for (const line of tail.split('\n')) {
+    try {
+      const e = JSON.parse(line);
+      if ((e.type === 'user' || e.type === 'assistant') && !e.isSidechain && !e.isMeta) entries.push(e);
+    } catch (e) { /* обрезанная первая строка хвоста */ }
+  }
+  let last = -1;
+  for (let i = entries.length - 1; i >= 0; i--) {
+    if (entries[i].type === 'user' && textOf(entries[i])) { last = i; break; }
+  }
+  if (last < 0) return false;
+  const said = textOf(entries[last]).toLowerCase().replace(/[.!…\s]+$/, '');
+  if (!(cfg.stop_words || STOP_WORDS).includes(said)) return false;
+  const answer = entries.slice(last + 1).filter(e => e.type === 'assistant').map(textOf).join('\n');
+  return !/^#{1,3}\s*Промпт/m.test(answer);
+}
+
+function logEvent(cfg, row) {
+  try {
+    if (cfg.metrics === false || !cfg.central) return;
+    const dir = path.join(cfg.central, '.metrics');
+    fs.mkdirSync(dir, { recursive: true });
+    const ts = new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 19);
+    fs.appendFileSync(path.join(dir, 'events.jsonl'), JSON.stringify(Object.assign({ ts, tool: cfg.tool }, row)) + '\n');
+  } catch (e) { /* журнал не критичен */ }
+}
+
 try {
   const cfg = kit.loadConfig();
   if (!cfg) process.exit(0);
+
+  const input = readStdin();
+  if (endRitualMissing(input, cfg)) {
+    logEvent(cfg, { event: 'guard', key: 'end_prompt', blocked: true,
+      session: String(input.session_id || '').slice(0, 8), project: path.basename(kit.projectDir(cfg, process.cwd())) });
+    console.log(JSON.stringify({
+      decision: 'block',
+      reason: 'Человек попросил закончить сессию, а в ответе нет раздела «## Промпт». Ритуал конца сессии ' +
+        'не доведён: пройди его шаги из правил и выведи «## Промпт» с текстом для начала следующей сессии.',
+    }));
+    process.exit(0);
+  }
 
   const today = new Date().toISOString().slice(0, 10);
   const flag = path.join(os.tmpdir(), 'memory-kit-reminded-' + (cfg.tool || 'agent') + '-' + today);
   if (fs.existsSync(flag)) process.exit(0);
 
-  const input = readStdin();
   if (input.transcript_path) {
     try {
       if (fs.statSync(input.transcript_path).size < MIN_TRANSCRIPT_BYTES) process.exit(0);

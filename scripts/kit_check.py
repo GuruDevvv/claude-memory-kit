@@ -23,6 +23,7 @@ import sys
 HOOK_FILES = ["kit.js", "session-start-context.js", "session-summary-check.js", "memory-index-hook.py",
               "memory-recall-hook.py"]
 SCRIPT_FILES = ["memory_index.py", "memory_search.py", "session_archive.py", "project_index.py", "kit_check.py",
+                "memory_report.py",
                 "find-zombies.ps1"]
 HOOKS_ALIVE = "memory-kit: хуки работают"
 CODEX_RULES_MAX = 32 * 1024

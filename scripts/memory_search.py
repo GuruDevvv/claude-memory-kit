@@ -32,6 +32,7 @@ import os
 import re
 import sqlite3
 import sys
+import time
 
 SKIP_FILES = {"MEMORY.md", "MEMORY.head.md", "INDEX.md", "PROJECT_INDEX.md"}
 MAX_DOC_CHARS = 20000       # длинный хвост файла на ранг почти не влияет, а сборку замедляет
@@ -68,6 +69,32 @@ def sessions_dir():
         return data.get("sessions_dir") or os.path.join(os.path.dirname(data["central"]), "sessions")
     except Exception:
         return os.path.join(os.path.expanduser("~"), ".agent-memory", "sessions")
+
+
+METRICS_MAX_BYTES = 1024 * 1024
+
+
+def log_event(event, **fields):
+    """Строка в журнал срабатываний: <общая память>/.metrics/events.jsonl. По нему видно, работает ли память:
+    сколько раз правила показаны, сколько раз искали, что остановлено. Текст команд и запросов целиком
+    не пишется. Ошибка записи работу не останавливает. Выключается ключом "metrics": false."""
+    try:
+        cfg_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "memory-kit.json")
+        with open(cfg_path, encoding="utf-8") as fh:
+            cfg = json.load(fh)
+        if cfg.get("metrics") is False or not cfg.get("central"):
+            return
+        folder = os.path.join(cfg["central"], ".metrics")
+        os.makedirs(folder, exist_ok=True)
+        path = os.path.join(folder, "events.jsonl")
+        if os.path.exists(path) and os.path.getsize(path) > METRICS_MAX_BYTES:
+            os.replace(path, os.path.join(folder, "events.%s.jsonl" % time.strftime("%Y%m%d-%H%M%S")))
+        row = {"ts": time.strftime("%Y-%m-%dT%H:%M:%S"), "tool": cfg.get("tool"), "event": event}
+        row.update({k: v for k, v in fields.items() if v not in (None, "", [])})
+        with open(path, "a", encoding="utf-8", newline="\n") as fh:
+            fh.write(json.dumps(row, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
 
 
 # Одно понятие — разные написания. Только то, что реально пишут двумя способами; основы, не слова.
@@ -305,6 +332,8 @@ def main(argv):
     else:
         dirs = memory_dirs(os.getcwd(), a.all, a.dir)
     hits = search(" ".join(a.query), dirs, a.n, a.kind, a.sessions)
+    log_event("search", project=os.path.basename(os.getcwd()), words=len(" ".join(a.query).split()),
+              sessions=a.sessions or None, files=[h["file"] for h in hits])
     if a.json:
         print(json.dumps(hits, ensure_ascii=False, indent=1))
     elif hits:
