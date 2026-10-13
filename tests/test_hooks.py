@@ -213,10 +213,13 @@ ctx = recall("subagent", {"session_id": sid, "cwd": os.path.join(proj, "src")})
 check("помощник получает записку проекта и команду поиска", "записка магазина" in ctx and "memory_search.py" in ctx
       and len(ctx) <= 3000, ctx[:300])
 settings = json.load(open(os.path.join(home, ".claude", "settings.json"), encoding="utf-8"))["hooks"]
-check("хуки момента прописаны у Claude и не прописаны у Codex", "SubagentStart" in settings
+codex_hooks = json.load(open(os.path.join(home, ".codex", "hooks.json"), encoding="utf-8"))["hooks"]
+check("хуки момента прописаны у Claude и у Codex", "SubagentStart" in settings
       and any("memory-recall-hook.py prompt" in h["command"] for g in settings["UserPromptSubmit"] for h in g["hooks"])
       and any("memory-recall-hook" in h["command"] for g in settings["PreToolUse"] for h in g["hooks"])
-      and "memory-recall" not in io.open(os.path.join(home, ".codex", "hooks.json"), encoding="utf-8").read())
+      and any("memory-recall-hook" in h["command"] and g["matcher"] == "Bash"
+              for g in codex_hooks["PreToolUse"] for h in g["hooks"])
+      and "UserPromptSubmit" in codex_hooks and "PostToolUse" not in codex_hooks)
 
 code, out = installer("--tool", "both", "--check")
 check("проверка установки проходит", code == 0, out[-600:])

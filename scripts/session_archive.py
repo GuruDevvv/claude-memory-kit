@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Архив разговоров: текст человека и агента из записей сессий Claude Code — до того, как их сотрут.
+"""Архив разговоров: текст человека и агента из записей сессий Claude Code и Codex — до того, как их сотрут.
 
 Зачем. Claude Code хранит записи сессий 30 дней и удаляет. Вместе с ними пропадает то, что
 не попало ни в журнал, ни в правило: почему решили так, что именно сказал человек.
@@ -66,6 +66,12 @@ def _places():
 
 
 SOURCE, ARCHIVE = _places()
+# Codex пишет записи в ~/.codex/sessions/ГГГГ/ММ/ДД/rollout-<дата>-<id>.jsonl. Берём только разговоры
+# с человеком: запуски `codex exec` (их зовёт другой агент или скрипт) и помощников пропускаем.
+CODEX_SOURCE = os.path.join(os.path.expanduser("~"), ".codex", "sessions")
+CODEX_SKIP = ("# AGENTS.md instructions", "<environment_context", "<recommended_plugins", "<external_codex_apps",
+              "<realtime_delegation", "<image name=", "</image>", "<bash-stdout", "<in-app-browser-context",
+              "<user_instructions", "<turn_aborted")
 
 
 def mask(text):
@@ -135,6 +141,104 @@ def convert(path):
     return "\n".join(out), first, cwd
 
 
+def codex_words(payload):
+    """Текст сообщения из записи Codex без служебных вставок и приложенных картинок."""
+    parts = []
+    for b in payload.get("content") or []:
+        text = (b.get("text") or "") if isinstance(b, dict) else ""
+        if not text.strip() or text.lstrip().startswith(CODEX_SKIP):
+            continue
+        if "## My request for Codex:" in text:          # перед просьбой идёт список приложенных файлов
+            text = text.split("## My request for Codex:", 1)[1]
+        parts.append(text)
+    return clean("\n\n".join(parts))
+
+
+def convert_codex(path):
+    """Запись сессии Codex -> (текст архива, дата начала, папка проекта). Не разговор с человеком -> ('', '', '')."""
+    blocks, cwd, first, sid = [], "", "", ""
+    with open(path, encoding="utf-8", errors="replace") as fh:
+        for ln in fh:
+            try:
+                e = json.loads(ln)
+            except ValueError:
+                continue
+            p = e.get("payload") or {}
+            if e.get("type") == "session_meta":
+                if p.get("source") == "exec" or not isinstance(p.get("source"), str):
+                    return "", "", ""
+                cwd, sid = p.get("cwd") or "", p.get("id") or ""
+                continue
+            if e.get("type") != "response_item" or p.get("type") != "message" or p.get("role") not in ("user", "assistant"):
+                continue
+            text = codex_words(p)
+            if not text:
+                continue
+            when = stamp(e.get("timestamp") or "")
+            first = first or when
+            who = "человек" if p["role"] == "user" else "агент"
+            if blocks and blocks[-1][0] == who == "агент":
+                blocks[-1][2].append(text)
+            else:
+                blocks.append([who, when, [text]])
+    if not sid or not any(b[0] == "человек" for b in blocks):
+        return "", "", ""
+    out = ["# Сессия %s" % sid, "", "Проект: %s" % (cwd or "?"), "Начало: %s" % first, "Агент: Codex", ""]
+    for who, when, texts in blocks:
+        out += ["## [%s] %s" % (when, who), "", "\n\n".join(texts), ""]
+    return "\n".join(out), first, cwd
+
+
+def sweep_codex(limit=None, dry=False):
+    """То же для Codex. Что уже разобрано, помнит файл .codex.json в архиве: папка проекта у Codex
+    написана внутри записи, и без этого файла каждую пришлось бы открывать заново. -> (взято, пропущено)."""
+    done = empty = 0
+    now = time.time()
+    index_path = os.path.join(ARCHIVE, ".codex.json")
+    try:
+        with open(index_path, encoding="utf-8") as fh:
+            index = json.load(fh)
+    except Exception:
+        index = {}
+    changed = False
+    files = sorted(glob.glob(os.path.join(CODEX_SOURCE, "*", "*", "*", "rollout-*.jsonl")), key=os.path.getmtime)
+    for path in files:
+        mtime = os.path.getmtime(path)
+        sid = os.path.splitext(os.path.basename(path))[0][-36:]
+        if now - mtime < IDLE_SECONDS or (index.get(sid) or {}).get("mtime", 0) >= mtime:
+            continue
+        if limit is not None and done >= limit:
+            break
+        if dry:
+            done += 1
+            continue
+        text, first, cwd = convert_codex(path)
+        old = (index.get(sid) or {}).get("file")
+        index[sid] = {"mtime": mtime}
+        changed = True
+        if not text:
+            empty += 1
+            continue
+        slug = re.sub(r"[^A-Za-z0-9]", "-", cwd) or "codex"
+        dst = os.path.join(ARCHIVE, slug, "%s_%s.md" % (first[:10], sid[:8]))
+        os.makedirs(os.path.dirname(dst), exist_ok=True)
+        if old and old != dst and os.path.exists(old):
+            os.remove(old)
+        tmp = "%s.%d.tmp" % (dst, os.getpid())
+        with open(tmp, "wb") as fh:
+            fh.write(text.encode("utf-8"))
+        os.replace(tmp, dst)
+        index[sid]["file"] = dst
+        done += 1
+    if changed:
+        os.makedirs(ARCHIVE, exist_ok=True)
+        tmp = "%s.%d.tmp" % (index_path, os.getpid())
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump(index, fh)
+        os.replace(tmp, index_path)
+    return done, empty
+
+
 def target(path, first):
     slug = os.path.basename(os.path.dirname(path))
     sid = os.path.splitext(os.path.basename(path))[0]
@@ -192,9 +296,12 @@ def main(argv):
             pass
     quiet, dry = "--quiet" in argv, "--dry" in argv
     limit = int(argv[argv.index("--max") + 1]) if "--max" in argv else None
-    if not os.path.isdir(SOURCE):
-        return 0
-    done, empty = sweep(limit, dry)
+    done = empty = 0
+    if os.path.isdir(SOURCE):
+        done, empty = sweep(limit, dry)
+    if os.path.isdir(CODEX_SOURCE):
+        more = sweep_codex(None if limit is None else max(0, limit - done), dry)
+        done, empty = done + more[0], empty + more[1]
     if not quiet or dry:
         print("архив сессий %s: %s %d, пустых %d" % (ARCHIVE.replace(os.sep, "/"),
                                                      "взял бы" if dry else "взято", done, empty))

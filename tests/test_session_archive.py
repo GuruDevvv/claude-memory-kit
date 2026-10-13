@@ -95,5 +95,44 @@ hits = ms.search("почему скидка в корзине", [sa.ARCHIVE], 3,
 check("поиск находит разговор и показывает проект с датой",
       bool(hits) and hits[0]["kind"] == "session" and hits[0]["title"].startswith("Shop, 2026-09-01"), str(hits)[:300])
 
+# записи Codex: другая раскладка, папка проекта внутри записи
+sa.CODEX_SOURCE = os.path.join(box, "codex")
+
+
+def codex(sid, source, entries, age_minutes=120):
+    p = os.path.join(sa.CODEX_SOURCE, "2026", "09", "02", "rollout-2026-09-02T10-00-00-%s.jsonl" % sid)
+    os.makedirs(os.path.dirname(p), exist_ok=True)
+    rows = [{"timestamp": "2026-09-02T10:00:00.000Z", "type": "session_meta",
+             "payload": {"id": sid, "cwd": "E:\\Work\\Shop", "source": source}}]
+    for role, texts in entries:
+        kind = "output_text" if role == "assistant" else "input_text"
+        rows.append({"timestamp": "2026-09-02T10:01:00.000Z", "type": "response_item",
+                     "payload": {"type": "message", "role": role, "content": [{"type": kind, "text": t} for t in texts]}})
+    with io.open(p, "w", encoding="utf-8", newline="\n") as fh:
+        for e in rows:
+            fh.write(json.dumps(e, ensure_ascii=False) + "\n")
+    t = time.time() - age_minutes * 60
+    os.utime(p, (t, t))
+    return p
+
+
+codex("11111111-aaaa-bbbb-cccc-000000000001", "cli", [
+    ("developer", ["служебная вставка разработчика"]),
+    ("user", ["# AGENTS.md instructions for E:\\Work\\Shop\nправила проекта"]),
+    ("user", ["<environment_context><cwd>E:\\Work\\Shop</cwd></environment_context>"]),
+    ("user", ["\n# Files mentioned by the user:\n\n## a.png: C:/tmp/a.png\n\n## My request for Codex:\nпочини оплату картой\n"]),
+    ("assistant", ["Оплата падала из-за старого ключа, заменил."])])
+codex("22222222-aaaa-bbbb-cccc-000000000002", "exec", [("user", ["служебный вызов из скрипта"]), ("assistant", ["ответ"])])
+done, empty = sa.sweep_codex()
+files = [f for f in os.listdir(os.path.join(sa.ARCHIVE, "E--Work-Shop")) if f.endswith("_11111111.md")]
+text = io.open(os.path.join(sa.ARCHIVE, "E--Work-Shop", files[0]), encoding="utf-8").read() if files else ""
+check("Codex: разговор с человеком в архиве, служебный вызов — нет", done == 1 and empty == 1 and len(files) == 1, f"{done} {empty} {files}")
+check("Codex: есть просьба и ответ, нет правил, окружения и списка файлов",
+      "почини оплату картой" in text and "старого ключа" in text and "Агент: Codex" in text
+      and not any(x in text for x in ("AGENTS.md", "environment_context", "a.png", "служебная")), text)
+check("Codex: повторный проход ничего не трогает", sa.sweep_codex() == (0, 0))
+hits = ms.search("оплата картой старый ключ", [sa.ARCHIVE], 3, None, True)
+check("Codex: поиск находит разговор", bool(hits) and hits[0]["title"].startswith("Shop, 2026-09-02"), str(hits)[:300])
+
 print(f"\nитого: {sum(results)} из {len(results)}")
 sys.exit(0 if all(results) else 1)

@@ -39,7 +39,9 @@ WANTED = {
                ("PreToolUse", "memory-recall-hook.py", "pre"), ("SubagentStart", "memory-recall-hook.py", "subagent"),
                ("UserPromptSubmit", "memory-recall-hook.py", "prompt")],
     "codex": [("SessionStart", "session-start-context.js", ""), ("Stop", "session-summary-check.js", ""),
-              ("Stop", "memory-index-hook.py", "stop")],
+              ("Stop", "memory-index-hook.py", "stop"),
+              ("PreToolUse", "memory-recall-hook.py", "pre"), ("SubagentStart", "memory-recall-hook.py", "subagent"),
+              ("UserPromptSubmit", "memory-recall-hook.py", "prompt")],
 }
 
 

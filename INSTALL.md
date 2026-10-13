@@ -120,7 +120,8 @@
 | `UserPromptSubmit` | все | `python <папка агента>/hooks/memory-recall-hook.py prompt`, ожидание 10 с |
 | `SubagentStart` | все | `python <папка агента>/hooks/memory-recall-hook.py subagent`, ожидание 10 с |
 
-**Codex**, файл `~/.codex/hooks.json`: только первые три строки таблицы. Новые хуки Codex пропускает,
+**Codex**, файл `~/.codex/hooks.json`: все строки, кроме `PostToolUse`; у `PreToolUse` в графе инструментов
+только `Bash` (так Codex называет команды оболочки). Новые хуки Codex пропускает,
 пока человек не подтвердит их сам: в консольном Codex набрать `/hooks` и подтвердить. Скажи ему об этом.
 
 Пути пиши полные. На Windows годятся прямые слэши. Вместо `python` поставь ту команду, которой

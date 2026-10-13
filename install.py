@@ -200,14 +200,15 @@ def wanted_hooks(tool, tool_dir):
     if tool == "claude":      # у Codex правка файлов идёт другим инструментом; там хватает сборки в конце хода
         out.append(("PostToolUse", "Write|Edit|MultiEdit",
                     {"type": "command", "command": py("memory-index-hook.py", "post"), "timeout": 30}))
-        # память в нужный момент: правила перед коммитом и сервером, короткий контекст помощнику.
-        # У Codex не ставим: принимает ли он добавку в контекст на этих событиях, не проверено
-        out.append(("PreToolUse", "Bash|PowerShell",
-                    {"type": "command", "command": py("memory-recall-hook.py", "pre"), "timeout": 10}))
-        out.append(("UserPromptSubmit", "",
-                    {"type": "command", "command": py("memory-recall-hook.py", "prompt"), "timeout": 10}))
-        out.append(("SubagentStart", "",
-                    {"type": "command", "command": py("memory-recall-hook.py", "subagent"), "timeout": 10}))
+    # память в нужный момент: правила перед коммитом и сервером, по словам просьбы, короткий контекст помощнику.
+    # Codex зовёт команды оболочки именем Bash и принимает на этих событиях и отказ, и добавку в контекст
+    # (его документация по хукам, сверено 13.10.2026)
+    out.append(("PreToolUse", "Bash|PowerShell" if tool == "claude" else "Bash",
+                {"type": "command", "command": py("memory-recall-hook.py", "pre"), "timeout": 10}))
+    out.append(("UserPromptSubmit", "",
+                {"type": "command", "command": py("memory-recall-hook.py", "prompt"), "timeout": 10}))
+    out.append(("SubagentStart", "",
+                {"type": "command", "command": py("memory-recall-hook.py", "subagent"), "timeout": 10}))
     return out
 
 
