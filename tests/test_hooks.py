@@ -85,6 +85,18 @@ ctx = start_hook(bare)
 check("проект без записки: журнал всё равно приходит", "запись журнала без записки" in ctx, ctx[:300])
 check("метка хука есть всегда", "memory-kit: хуки работают" in ctx)
 
+# снимок перед сжатием: копия записки, напоминание после сжатия — один раз
+subprocess.run(["node", os.path.join(home, ".claude", "hooks", "session-start-context.js"), "precompact"],
+               cwd=proj, capture_output=True, stdin=subprocess.DEVNULL)
+snaps = os.path.join(home, ".claude", "handoff-snapshots", "Shop")
+copies = [f for f in os.listdir(snaps) if f.startswith("HANDOFF-")] if os.path.isdir(snaps) else []
+check("перед сжатием: копия записки лежит", len(copies) == 1
+      and "записка магазина" in io.open(os.path.join(snaps, copies[0]), encoding="utf-8").read(), str(copies))
+ctx = start_hook(proj)
+check("после сжатия: напоминание и путь к снимку", "только что сжат" in ctx and copies and copies[0] in ctx, ctx[:400])
+check("напоминание о сжатии — один раз", "только что сжат" not in start_hook(proj))
+check("в другом проекте о чужом сжатии молчат", "только что сжат" not in start_hook(bare))
+
 # напоминание: запись в чужом журнале не закрывает свой проект
 old = time.time() - 3 * 86400
 os.utime(os.path.join(central, "projects", "Shop.md"), (old, old))
@@ -140,6 +152,12 @@ check("вторая просьба про слайды за сессию — б�
 check("обычная просьба и команда со слэшем — без подсказки",
       recall("prompt", {"session_id": sid + "p", "cwd": proj, "prompt": "ок, делай"}) == ""
       and recall("prompt", {"session_id": sid + "p", "cwd": proj, "prompt": "/slides слайд"}) == "")
+write(os.path.join(central, "ref", "word-hangs.md"), "---\nname: word\nmetadata:\n  type: reference\n"
+      "  index_line: \"Word висит на docx из сети: открывать копию с диска\"\n---\n\nWord docx обход: скопировать локально\n")
+ctx = recall("prompt", {"session_id": sid + "s", "cwd": proj, "prompt": "Word завис при открытии docx"})
+check("«завис» приносит записку именно про эту программу", "Word висит" in ctx and "кликами" not in ctx, ctx[:300])
+check("«завис» без знакомой программы — тишина", recall("prompt", {"session_id": sid + "s2", "cwd": proj,
+      "prompt": "Фотошоп завис"}) == "")
 check("слово «слайд» в команде оболочки подсказку не вызывает", recall("pre", {"session_id": sid + "p", "cwd": proj,
       "tool_name": "Bash", "tool_input": {"command": "echo слайд"}}) == "")
 
@@ -316,6 +334,35 @@ code, out = installer("--tool", "codex")
 check("правила Codex больше потолка: установщик предупреждает", "Codex читает только первые" in out, out[-600:])
 code, out = installer("--tool", "codex", "--check")
 check("и проверка установки это ловит", code != 0 and "потолок Codex" in out, out[-600:])
+
+# конец хода: журнал обрезается до 5 записей, старое — в архив; битая ссылка оглавления останавливает ход один раз
+def index_stop():
+    r = subprocess.run([sys.executable, os.path.join(home, ".claude", "hooks", "memory-index-hook.py"), "stop"],
+                       input="{}", capture_output=True, text=True, encoding="utf-8", errors="replace", env=env)
+    return r.stdout
+
+
+cafe = os.path.join(central, "projects", "Cafe.md")
+write(cafe, "# Журнал Cafe\n\n" + "".join("## [2026-10-%02d 10:00]\nзапись %d\n\n" % (20 - i, i) for i in range(8)))
+old = time.time() - 5 * 86400
+os.utime(cafe, (old, old))
+index_stop()
+kept = io.open(cafe, encoding="utf-8").read()
+arch = os.path.join(central, "projects", "archive", "Cafe.md")
+archived = io.open(arch, encoding="utf-8").read() if os.path.exists(arch) else ""
+check("журнал: остались 5 свежих записей и вступление", kept.count("## [") == 5 and "запись 0" in kept
+      and "запись 4" in kept and kept.startswith("# Журнал Cafe"), kept[:300])
+check("журнал: 3 старые записи в архиве, ничего не потеряно", archived.count("## [") == 3 and "запись 7" in archived
+      and "запись 5" in archived, archived[:300])
+check("журнал: время правки после обрезки прежнее", abs(os.path.getmtime(cafe) - old) < 2)
+head_file = os.path.join(central, "MEMORY.head.md")
+write(head_file, io.open(head_file, encoding="utf-8").read() + "\n- [пропавшее](feedback/no_such_rule.md)\n")
+for f in os.listdir(tempfile.gettempdir()):             # отметка «уже говорил» от прошлого прогона тестов
+    if f.startswith("memory-kit-links-"):
+        os.remove(os.path.join(tempfile.gettempdir(), f))
+out = index_stop()
+check("битая ссылка в оглавлении останавливает конец хода", '"block"' in out and "no_such_rule.md" in out, out[:300])
+check("та же битая ссылка второй раз ход не останавливает", '"block"' not in index_stop())
 
 print(f"\nитого: {sum(results)} из {len(results)}")
 sys.exit(0 if all(results) else 1)

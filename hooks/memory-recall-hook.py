@@ -53,6 +53,13 @@ GROUPS = [
     {"key": "chat", "title": "разбор переписки",
      "prompt": _READ + r"[^.!?\n]{0,60}" + _CHAT + "|" + _CHAT + r"[^.!?\n]{0,40}" + _READ,
      "query": "разобрать переписку чат Telegram голосовые расшифровать"},
+    # программа зависла или не открывается: у инструмента обычно уже записаны грабли и обход, а без
+    # подсказки агент чинит с нуля (идея пользователя набора, 14.10.2026). Слова просьбы идут в поиск — по ним
+    # находится записка именно про этот инструмент
+    {"key": "stuck", "title": "инструмент завис или не работает", "with_text": True,
+     "prompt": r"завис|висн|не\s+(?:открыва|запуска|грузит|загружа|отвеча|работает|стартует|подключа)|"
+               r"пада[ею]т|упал|вылета|крашит|не\s+видит|ошибк[аиу]\s+при",
+     "query": "завис не открывается падает обход грабли"},
     {"key": "commit", "title": "коммит и публикация",
      "pattern": r"\bgit\s+(?:-[Cc]\s+\S+\s+)*(?:commit|push|add|merge|rebase|reset|tag)\b|\bgh\s+(?:pr|release)\s+(?:create|merge)",
      "block": r"\bgit\s+(?:-[Cc]\s+\S+\s+)*push\b|\bgh\s+(?:pr|release)\s+(?:create|merge)",
@@ -172,8 +179,12 @@ def int_of(v):
 def pick(ms, group, command, dirs):
     """До MAX_LINES правил по теме: раздел или поиск привели к правилу, порядок — проверенность и слова команды."""
     stems = [ms.norm(x) for x in group.get("moments", [])]
+    if group.get("with_text"):              # сами слова жалобы («завис», «падает») есть в половине правил — убираем
+        command = re.sub(group["prompt"], " ", command, flags=re.I)
+    # with_text: ищем по словам самой просьбы (имя программы, текст ошибки), общие слова темы только мешают
+    query = command[:300] if group.get("with_text") else group.get("query", "")
     found = {(h["dir"], h["file"]) for kind in ("rule", "ref")
-             for h in ms.search(group.get("query", ""), dirs, 8, kind)}
+             for h in ms.search(query, dirs, 8, kind)}
     # слова самой команды (push, force, pm2, restart), но не куски путей и адресов: по ним в подсказку
     # лезло постороннее — «claude», «memory», имя папки (живая проба 12.10.2026)
     plain = " ".join(t for t in re.split(r"\s+", command) if not re.search(r"[/\\.:@~$]", t))
@@ -191,7 +202,11 @@ def pick(ms, group, command, dirs):
             body = ms.norm(title + "\n" + text)
             weight = (2 if by_moment else 0) + (1 if status != "проба" else 0) + (2 if status != "проба" and seen >= 2 else 0)
             weight += {"owner": 1, "owner_ok": 1}.get((m.get("origin_kind") or "").lower(), 0)
-            weight += min(3, 1.5 * sum(1 for w in words if re.search(r"(?<![0-9a-zа-я_])" + re.escape(w), body)))
+            hits = sum(1 for w in words if re.search(r"(?<![0-9a-zа-я_])" + re.escape(w), body))
+            if group.get("with_text") and not hits:
+                continue                      # правило не про эту программу — не подкладываем
+            # у «зависло» решает то, про ту ли это программу, а не проверенность правила
+            weight += min(9, 3 * hits) if group.get("with_text") else min(3, 1.5 * hits)
             out.append((-weight, rel, title, mem.replace(os.sep, "/")))
     out.sort()
     return out[:MAX_LINES]

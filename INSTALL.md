@@ -54,7 +54,7 @@
 | Откуда | Куда | Файлы |
 |---|---|---|
 | `hooks/` | `<папка агента>/hooks/` | `kit.js`, `session-start-context.js`, `session-summary-check.js`, `memory-index-hook.py`, `memory-recall-hook.py` |
-| `scripts/` | `<папка агента>/scripts/` | `memory_index.py`, `memory_search.py`, `session_archive.py`, `project_index.py`, `kit_check.py`, `memory_report.py`, `find-zombies.ps1` |
+| `scripts/` | `<папка агента>/scripts/` | `memory_index.py`, `memory_search.py`, `session_archive.py`, `project_index.py`, `kit_check.py`, `memory_report.py`, `memory_upkeep.py`, `find-zombies.ps1` |
 
 Файл с таким именем уже лежит и отличается? Это своя версия человека. Сохрани копию, сравни
 с файлом набора и выпиши, что в ней есть сверх набора. Каждое отличие покажи человеку: либо оно
@@ -86,6 +86,7 @@
 | `inject_project_index` | то же для памяти проекта. Claude Code подгружает её сам, поэтому у него `false`, у Codex `true` |
 | `sync_on_start` | в начале сессии забрать с сервера новые коммиты в папке, где открыт агент. Файлы обновляются, только если нет несохранённых правок и не нужно слияние |
 | `journal_entries` | сколько последних записей журнала проекта показывать на старте |
+| `journal_keep` | сколько записей держать в журнале, остальное уходит в `projects/archive/`; по умолчанию 5, `0` — не обрезать |
 | `start_max_chars` | потолок текста, который хук отдаёт на старте. У Codex ставь `5800`: больше он к модели не пропускает и вырезает середину. Тогда приходят записка проекта, одна запись журнала, раздел «Всегда» и адрес полного оглавления. У Claude Code ключ не нужен |
 | `sessions_dir` | свой адрес архива разговоров, если он не рядом с `central` |
 | `project_index` | `false`: список проектов `PROJECT_INDEX.md` в конце хода не собирать. Нужно, если его уже ведёт другое средство |
@@ -120,8 +121,9 @@
 | `PreToolUse` | `Bash\|PowerShell` | `python <папка агента>/hooks/memory-recall-hook.py pre`, ожидание 10 с |
 | `UserPromptSubmit` | все | `python <папка агента>/hooks/memory-recall-hook.py prompt`, ожидание 10 с |
 | `SubagentStart` | все | `python <папка агента>/hooks/memory-recall-hook.py subagent`, ожидание 10 с |
+| `PreCompact` | все | `node <папка агента>/hooks/session-start-context.js precompact`, ожидание 10 с |
 
-**Codex**, файл `~/.codex/hooks.json`: все строки, кроме `PostToolUse`; у `PreToolUse` в графе инструментов
+**Codex**, файл `~/.codex/hooks.json`: все строки, кроме `PostToolUse` и `PreCompact`; у `PreToolUse` в графе инструментов
 только `Bash` (так Codex называет команды оболочки). Новые хуки Codex пропускает,
 пока человек не подтвердит их сам: в консольном Codex набрать `/hooks` и подтвердить. Скажи ему об этом.
 

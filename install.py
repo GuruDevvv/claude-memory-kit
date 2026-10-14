@@ -36,7 +36,7 @@ START, END = "<!-- memory-kit:start -->", "<!-- memory-kit:end -->"
 HOOK_FILES = ["kit.js", "session-start-context.js", "session-summary-check.js", "memory-index-hook.py",
               "memory-recall-hook.py"]
 SCRIPT_FILES = ["memory_index.py", "memory_search.py", "session_archive.py", "project_index.py", "kit_check.py",
-                "memory_report.py",
+                "memory_report.py", "memory_upkeep.py",
                 "find-zombies.ps1"]
 MEMORY_DIRS = ["feedback", "ref", "projects", "plans", "research", "reviews"]
 STAMP = time.strftime("%Y%m%d-%H%M%S")
@@ -202,6 +202,9 @@ def wanted_hooks(tool, tool_dir):
     if tool == "claude":      # у Codex правка файлов идёт другим инструментом; там хватает сборки в конце хода
         out.append(("PostToolUse", "Write|Edit|MultiEdit",
                     {"type": "command", "command": py("memory-index-hook.py", "post"), "timeout": 30}))
+        # снимок записки перед сжатием разговора; напоминание приходит после сжатия хуком старта
+        out.append(("PreCompact", "", {"type": "command", "command": node("session-start-context.js") + " precompact",
+                                       "timeout": 10}))
     # память в нужный момент: правила перед коммитом и сервером, по словам просьбы, короткий контекст помощнику.
     # Codex зовёт команды оболочки именем Bash и принимает на этих событиях и отказ, и добавку в контекст
     # (его документация по хукам, сверено 13.10.2026)
@@ -218,7 +221,7 @@ def hook_key(command):
     """По чему узнаём свой хук в чужих настройках: имя скрипта + режим."""
     for name in HOOK_FILES:
         if name in command:
-            mode = next((m for m in ("stop", "post", "pre", "subagent") if command.rstrip().endswith(" " + m)), "")
+            mode = next((m for m in ("stop", "post", "pre", "subagent", "precompact") if command.rstrip().endswith(" " + m)), "")
             return name + ":" + mode
     return None
 

@@ -23,7 +23,7 @@ import sys
 HOOK_FILES = ["kit.js", "session-start-context.js", "session-summary-check.js", "memory-index-hook.py",
               "memory-recall-hook.py"]
 SCRIPT_FILES = ["memory_index.py", "memory_search.py", "session_archive.py", "project_index.py", "kit_check.py",
-                "memory_report.py",
+                "memory_report.py", "memory_upkeep.py",
                 "find-zombies.ps1"]
 HOOKS_ALIVE = "memory-kit: хуки работают"
 CODEX_RULES_MAX = 32 * 1024
@@ -37,7 +37,8 @@ WANTED = {
     "claude": [("SessionStart", "session-start-context.js", ""), ("Stop", "session-summary-check.js", ""),
                ("Stop", "memory-index-hook.py", "stop"), ("PostToolUse", "memory-index-hook.py", "post"),
                ("PreToolUse", "memory-recall-hook.py", "pre"), ("SubagentStart", "memory-recall-hook.py", "subagent"),
-               ("UserPromptSubmit", "memory-recall-hook.py", "prompt")],
+               ("UserPromptSubmit", "memory-recall-hook.py", "prompt"),
+               ("PreCompact", "session-start-context.js", "precompact")],
     "codex": [("SessionStart", "session-start-context.js", ""), ("Stop", "session-summary-check.js", ""),
               ("Stop", "memory-index-hook.py", "stop"),
               ("PreToolUse", "memory-recall-hook.py", "pre"), ("SubagentStart", "memory-recall-hook.py", "subagent"),

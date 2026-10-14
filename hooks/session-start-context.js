@@ -9,6 +9,11 @@
  *      Журнал приходит и без записки, если папка лежит под корнем проектов.
  *   3) Оглавление общей памяти (MEMORY.md) — всем; оглавление памяти проекта — тем,
  *      кто не подгружает его сам (Codex; Claude Code свою память проекта читает без хука).
+ *   4) Режим precompact (`node session-start-context.js precompact`, событие PreCompact): перед сжатием
+ *      разговора кладёт копию HANDOFF.md в <папка агента>/handoff-snapshots/<проект>/ и метку. Сказать агенту
+ *      PreCompact ничего не может — Claude Code его вывод модели не показывает (документация хуков,
+ *      сверено 14.10.2026). Поэтому напоминание приходит после сжатия: SessionStart видит свежую метку
+ *      и пишет, где снимок и что дописать. Идея пользователя набора, 14.10.2026.
  * Любая ошибка (нет сети, нет репозитория, нет HANDOFF) молча пропускается:
  * начало сессии не блокируется никогда.
  */
@@ -112,6 +117,46 @@ function syncWithRemote(cwd) {
     'Если владельцу это важно — предложить обновиться, но не делать молча.\n\n' + block + '\n';
 }
 
+const SNAPSHOTS_KEEP = 10;               // снимков на проект; старые удаляются
+const COMPACT_MARK_MAX_MS = 15 * 60 * 1000;  // метка старше — это уже не то сжатие
+
+function snapshotDir(cfg, projectName) {
+  // рядом с хуками, а не в памяти: память часто лежит под git, снимки записок туда не нужны
+  return path.join(__dirname, '..', 'handoff-snapshots', projectName);
+}
+
+/** PreCompact: копия записки до сжатия и метка для SessionStart. Сжатие не останавливает никогда. */
+function precompact(cfg, project) {
+  const name = path.basename(project);
+  const handoff = path.join(project, 'HANDOFF.md');
+  const dir = snapshotDir(cfg, name);
+  fs.mkdirSync(dir, { recursive: true });
+  let file = '';
+  if (fs.existsSync(handoff)) {
+    const d = new Date();
+    const pad = n => String(n).padStart(2, '0');
+    const stamp = d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + '-' +
+      pad(d.getHours()) + pad(d.getMinutes()) + pad(d.getSeconds());
+    file = path.join(dir, 'HANDOFF-' + stamp + '.md');
+    fs.copyFileSync(handoff, file);
+    const old = fs.readdirSync(dir).filter(f => /^HANDOFF-.*\.md$/.test(f)).sort();
+    for (const f of old.slice(0, Math.max(0, old.length - SNAPSHOTS_KEEP))) fs.unlinkSync(path.join(dir, f));
+  }
+  fs.writeFileSync(path.join(dir, '.compact-mark.json'), JSON.stringify({ time: Date.now(), file }));
+}
+
+/** SessionStart сразу после сжатия: строка-напоминание или пусто. Метку снимаем — второй раз не скажем. */
+function afterCompact(cfg, projectName) {
+  const mark = path.join(snapshotDir(cfg, projectName), '.compact-mark.json');
+  if (!fs.existsSync(mark)) return '';
+  const m = JSON.parse(fs.readFileSync(mark, 'utf-8'));
+  fs.unlinkSync(mark);
+  if (Date.now() - m.time > COMPACT_MARK_MAX_MS) return '';
+  return '### Разговор только что сжат\n\nЧасть деталей ушла в сжатие. ' +
+    (m.file ? 'Записка до сжатия сохранена: ' + m.file.replace(/\\/g, '/') + '. ' : '') +
+    'Если в сжатой части были решения, которых нет в HANDOFF.md, допиши их сейчас, пока помнишь.\n';
+}
+
 function clip(text, max, note) {
   return text.length > max ? text.slice(0, max) + '\n\n[...' + note + ']' : text;
 }
@@ -137,7 +182,15 @@ try {
   const cwd = process.cwd();
   const project = kit.projectDir(cfg, cwd);
   const projectName = path.basename(project);
+  if (process.argv[2] === 'precompact') {
+    if (kit.isProject(cfg, project)) precompact(cfg, project);
+    process.exit(0);
+  }
   const parts = [];
+  try {
+    const note = afterCompact(cfg, projectName);
+    if (note) parts.push(note);
+  } catch (e) { /* метка битая — молчим */ }
 
   // --- 1. Автосинк (любая папка с репозиторием) ---
   if (cfg.sync_on_start !== false) {

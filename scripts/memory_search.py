@@ -176,8 +176,9 @@ def first_line(body):
 def docs_of(mem):
     """Единицы поиска одной папки памяти: (вид, путь от папки, якорь, заголовок, текст, пометка, шапка файла)."""
     for root, dirs, files in os.walk(mem):
-        dirs[:] = [d for d in dirs if not d.startswith(".") and d != "archive"]
         rel_root = os.path.relpath(root, mem).replace(os.sep, "/")
+        # архив журналов (projects/archive) ищем: туда memory_upkeep.py переносит старые записи
+        dirs[:] = [d for d in dirs if not d.startswith(".") and (d != "archive" or rel_root == "projects")]
         top = rel_root.split("/")[0]
         for f in sorted(files):
             if not f.endswith(".md") or f in SKIP_FILES or f.startswith("_"):

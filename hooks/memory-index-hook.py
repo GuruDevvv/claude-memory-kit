@@ -8,6 +8,7 @@
   stop  — в конце хода (Stop): пересобрать все папки памяти (ловит то, что писали
           не через Write/Edit), обновить список проектов PROJECT_INDEX.md и забрать в архив
           разговоры законченных сессий, пока Claude Code их не стёр.
+          Там же memory_upkeep.py: обрезка журналов проектов и проверка ссылок оглавлений.
 
 Молчит, пока всё хорошо. Говорит, только если сборщик нашёл беду: потерю файла,
 превышение лимита, собственное падение. Ошибка хука не роняет сессию.
@@ -72,6 +73,17 @@ def label_in_background():
         pass
 
 
+def already_said(text):
+    """Этот набор битых ссылок уже показывали — второй раз ход не останавливаем."""
+    import hashlib
+    import tempfile
+    mark = os.path.join(tempfile.gettempdir(), "memory-kit-links-" + hashlib.sha1(text.encode("utf-8")).hexdigest()[:12])
+    if os.path.exists(mark):
+        return True
+    open(mark, "w").close()
+    return False
+
+
 def main():
     cfg = config()
     if not cfg:
@@ -93,6 +105,14 @@ def main():
                 problems.append(out)
         if cfg.get("label") is True:
             label_in_background()
+        # обрезка журналов и проверка ссылок оглавлений. Битые ссылки — единственное, о чём этот хук
+        # останавливает конец хода: stderr хука Stop агенту не виден. Один раз на один и тот же набор
+        code, out = run("memory_upkeep.py", ["--quiet"])
+        if code == 1 and out and not already_said(out):
+            print(json.dumps({"decision": "block", "reason": out + "\nПочини ссылки (файл переименован или удалён) "
+                              "и закончи ход. Повторно об этих же ссылках не скажу."}, ensure_ascii=True))
+        elif code not in (0, 1) and out:
+            problems.append(out)
     else:
         d = memory_dir((data.get("tool_input") or {}).get("file_path") or "", cfg["projects_dir"], cfg.get("central"))
         if not d:
