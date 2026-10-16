@@ -4,8 +4,8 @@
  *   1) в журнал проектов сегодня ничего не записано, или
  *   2) HANDOFF.md текущего проекта не обновлялся больше двух часов.
  * Не блокирует и не заставляет: только строка-напоминание. Не чаще раза в день.
- * После «стоп» один раз держит конец хода, если нет раздела «Промпт» или в репозиториях сессии
- * остались правки без коммита и незапушенные ветки.
+ * После «стоп» один раз держит конец хода, если нет раздела «Промпт» или в репозитории текущего
+ * проекта остались правки без коммита и незапушенные ветки.
  * На коротком разговоре молчит — длину сессии оценивает по размеру её записи.
  */
 const fs = require('fs');
@@ -27,7 +27,6 @@ function readStdin() {
 
 const STOP_WORDS = ['стоп', 'всё', 'все', 'завершай', 'пока', 'stop'];
 const TAIL_BYTES = 600000;
-const MAX_REPOS = 8;   // больше репозиториев за сессию не сверяем: хук держит конец хода
 
 /** Текст сообщения: строка либо склейка текстовых частей; служебные вставки вырезаны. */
 function textOf(entry) {
@@ -93,26 +92,17 @@ function git(cwd, args) {
   }).trim();
 }
 
-/** Репозитории сессии: рабочая папка и папки файлов, которые агент правил (по хвосту записи). */
-function sessionRepos(entries, cwd) {
-  const dirs = new Set([cwd]);
-  for (const e of entries) {
-    if (e.type !== 'assistant' || !Array.isArray(e.message && e.message.content)) continue;
-    for (const c of e.message.content) {
-      const f = c && c.type === 'tool_use' && c.input && (c.input.file_path || c.input.notebook_path);
-      if (typeof f === 'string' && path.isAbsolute(f)) dirs.add(path.dirname(f));
-    }
+/**
+ * Репозиторий текущего проекта (папка с HANDOFF.md вверх от рабочей) или пусто.
+ * Только он: прочие репозитории, которые сессия задела по пути (настройки, память, соседние проекты),
+ * часто несут чужие правки параллельных сессий, коммитить и пушить их по «стоп» нельзя.
+ */
+function projectRepo(cfg, cwd) {
+  try {
+    return path.resolve(git(kit.projectDir(cfg, cwd), ['rev-parse', '--show-toplevel']));
+  } catch (e) {
+    return '';
   }
-  const repos = new Map();
-  for (const d of dirs) {
-    if (repos.size >= MAX_REPOS) break;
-    try {
-      if (!fs.existsSync(d)) continue;
-      const top = path.resolve(git(d, ['rev-parse', '--show-toplevel']));
-      repos.set(top.toLowerCase(), top);
-    } catch (e) { /* не репозиторий */ }
-  }
-  return [...repos.values()];
 }
 
 /**
@@ -169,16 +159,14 @@ try {
         'не доведён: пройди его шаги из правил и выведи «## Промпт» с текстом для начала следующей сессии.');
     }
     if (guardOn(cfg, 'end_git')) {
-      const left = [];
-      for (const repo of sessionRepos(entries, process.cwd())) {
-        const l = gitLeftovers(repo);
-        if (l.length) left.push(repo.replace(/\\/g, '/') + ': ' + l.join('; '));
-      }
+      const repo = projectRepo(cfg, process.cwd());
+      const left = repo ? gitLeftovers(repo) : [];
       if (left.length) {
-        logEvent(cfg, { event: 'guard', key: 'end_git', blocked: true, session, project, repos: left.length });
-        reasons.push('В репозиториях сессии осталось недоведённое до сервера:\n- ' + left.join('\n- ') +
-          '\nЗакоммить свои правки поимённо (не всё подряд) и запушь. Чужое, незнакомое или то, что пушить ' +
-          'нельзя, не трогай, а назови в отчёте строкой на репозиторий: что запушено и почему остальное нет.');
+        logEvent(cfg, { event: 'guard', key: 'end_git', blocked: true, session, project });
+        reasons.push('В репозитории проекта ' + repo.replace(/\\/g, '/') + ' осталось недоведённое до сервера: ' +
+          left.join('; ') + '.\nЗакоммить свои правки поимённо (не всё подряд) и запушь. Чужое, незнакомое ' +
+          'или то, что пушить нельзя, не трогай, а назови в отчёте: что запушено и почему остальное нет. ' +
+          'Другие репозитории по «стоп» не коммить и не пушь.');
       }
     }
     if (reasons.length) {

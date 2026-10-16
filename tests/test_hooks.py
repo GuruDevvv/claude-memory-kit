@@ -209,10 +209,10 @@ A = lambda text: {"type": "assistant", "message": {"role": "assistant", "content
 TOOL = {"type": "user", "message": {"role": "user", "content": [{"type": "tool_result", "content": "ok"}]}}
 
 
-def ritual(lines, **extra):
+def ritual(lines, cwd=None, **extra):
     t = os.path.join(box, "transcript.jsonl")
     write(t, "\n".join(json.dumps(x, ensure_ascii=False) for x in lines) + "\n")
-    r = subprocess.run(["node", os.path.join(home, ".claude", "hooks", "session-summary-check.js")], cwd=proj,
+    r = subprocess.run(["node", os.path.join(home, ".claude", "hooks", "session-summary-check.js")], cwd=cwd or proj,
                        input=json.dumps(dict({"transcript_path": t, "session_id": "s1"}, **extra)),
                        capture_output=True, text=True, encoding="utf-8", errors="replace")
     return '"decision":"block"' in r.stdout
@@ -227,7 +227,7 @@ check("второй раз подряд не держит", not ritual([U("ст�
 check("служебная вставка в сообщении человека не мешает",
       ritual([U("стоп\n<system-reminder>что-то служебное</system-reminder>"), A("Готово.")]))
 
-# после «стоп» в репозиториях сессии не должно остаться незакоммиченного и незапушенного
+# после «стоп» в репозитории текущего проекта не должно остаться незакоммиченного и незапушенного
 def g(cwd, *args):
     return subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", "-c", "init.defaultBranch=master"]
                           + list(args), cwd=cwd, capture_output=True, text=True)
@@ -237,30 +237,35 @@ server, repo = os.path.join(box, "server.git"), os.path.join(box, "repo")
 g(box, "init", "--bare", server)
 g(box, "clone", server, repo)
 write(os.path.join(repo, "a.txt"), "1\n")
-g(repo, "add", "a.txt")
+write(os.path.join(repo, "HANDOFF.md"), "# HANDOFF — Repo\n")
+write(os.path.join(repo, "src", "keep.txt"), "k\n")
+g(repo, "add", "a.txt", "HANDOFF.md", "src/keep.txt")
 g(repo, "commit", "-m", "первый")
 g(repo, "push", "-u", "origin", "master")
 EDIT = {"type": "assistant", "message": {"role": "assistant", "content": [
     {"type": "tool_use", "name": "Edit", "input": {"file_path": os.path.join(repo, "a.txt")}}]}}
 DONE = A("Итог\n\n## Промпт\n> продолжи")
-check("git: всё запушено — «стоп» с «Промптом» проходит", not ritual([EDIT, U("стоп"), DONE]))
+check("git: всё запушено — «стоп» с «Промптом» проходит", not ritual([EDIT, U("стоп"), DONE], cwd=repo))
 write(os.path.join(repo, "a.txt"), "2\n")
-check("git: правленный файл без коммита — держит", ritual([EDIT, U("стоп"), DONE]))
+check("git: правленный файл без коммита — держит", ritual([EDIT, U("стоп"), DONE], cwd=repo))
 write(os.path.join(repo, "junk.tmp"), "x\n")
 g(repo, "commit", "-am", "второй")
-check("git: коммит не запушен — держит", ritual([EDIT, U("стоп"), DONE]))
+check("git: коммит не запушен — держит", ritual([EDIT, U("стоп"), DONE], cwd=repo))
 g(repo, "push")
-check("git: новый неотслеживаемый файл не держит", not ritual([EDIT, U("стоп"), DONE]))
+check("git: новый неотслеживаемый файл не держит", not ritual([EDIT, U("стоп"), DONE], cwd=repo))
 g(repo, "checkout", "-b", "feature")
 write(os.path.join(repo, "b.txt"), "b\n")
 g(repo, "add", "b.txt")
 g(repo, "commit", "-m", "ветка")
 g(repo, "checkout", "master")
-check("git: ветка без копии на сервере — держит", ritual([EDIT, U("стоп"), DONE]))
-check("git: без «стоп» репозитории не сверяет", not ritual([EDIT, U("сделай кнопку"), A("сделал")]))
-check("git: второй раз подряд не держит", not ritual([EDIT, U("стоп"), DONE], stop_hook_active=True))
+check("git: ветка без копии на сервере — держит", ritual([EDIT, U("стоп"), DONE], cwd=repo))
+check("git: без «стоп» репозитории не сверяет", not ritual([EDIT, U("сделай кнопку"), A("сделал")], cwd=repo))
+check("git: второй раз подряд не держит", not ritual([EDIT, U("стоп"), DONE], cwd=repo, stop_hook_active=True))
+check("git: правки в чужом репозитории при «стоп» в другом проекте не держат", not ritual([EDIT, U("стоп"), DONE]))
+check("git: запуск из подпапки проекта сверяет его репозиторий",
+      ritual([U("стоп"), DONE], cwd=os.path.join(repo, "src")))
 g(repo, "push", "-u", "origin", "feature")
-check("git: всё на сервере — снова проходит", not ritual([EDIT, U("стоп"), DONE]))
+check("git: всё на сервере — снова проходит", not ritual([EDIT, U("стоп"), DONE], cwd=repo))
 
 ctx = recall("subagent", {"session_id": sid, "cwd": os.path.join(proj, "src")})
 check("помощник получает записку проекта и команду поиска", "записка магазина" in ctx and "memory_search.py" in ctx
