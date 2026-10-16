@@ -4,11 +4,14 @@
  *   1) в журнал проектов сегодня ничего не записано, или
  *   2) HANDOFF.md текущего проекта не обновлялся больше двух часов.
  * Не блокирует и не заставляет: только строка-напоминание. Не чаще раза в день.
+ * После «стоп» один раз держит конец хода, если нет раздела «Промпт» или в репозиториях сессии
+ * остались правки без коммита и незапушенные ветки.
  * На коротком разговоре молчит — длину сессии оценивает по размеру её записи.
  */
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const cp = require('child_process');
 const kit = require('./kit.js');
 
 const HANDOFF_STALE_HOURS = 2;
@@ -24,6 +27,7 @@ function readStdin() {
 
 const STOP_WORDS = ['стоп', 'всё', 'все', 'завершай', 'пока', 'stop'];
 const TAIL_BYTES = 600000;
+const MAX_REPOS = 8;   // больше репозиториев за сессию не сверяем: хук держит конец хода
 
 /** Текст сообщения: строка либо склейка текстовых частей; служебные вставки вырезаны. */
 function textOf(entry) {
@@ -33,14 +37,9 @@ function textOf(entry) {
   return raw.replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, '').trim();
 }
 
-/**
- * Человек сказал «стоп», а в ответе агента нет раздела «Промпт» — ритуал конца сессии не доведён.
- * Смотрим хвост записи сессии: последнее сообщение человека и всё, что агент написал после него.
- * Запись не читается или устроена иначе (другой агент) — молчим.
- */
-function endRitualMissing(input, cfg) {
-  if (cfg.guard === false || (cfg.guard && cfg.guard.end_prompt === false)) return false;
-  if (input.stop_hook_active || !input.transcript_path) return false;   // второй раз не держим: петли не будет
+/** Хвост записи сессии: сообщения человека и агента по порядку. Не читается — пусто. */
+function readEntries(input) {
+  if (!input.transcript_path) return [];
   let tail;
   try {
     const size = fs.statSync(input.transcript_path).size;
@@ -50,7 +49,7 @@ function endRitualMissing(input, cfg) {
     fs.closeSync(fd);
     tail = buf.toString('utf-8');
   } catch (e) {
-    return false;
+    return [];
   }
   const entries = [];
   for (const line of tail.split('\n')) {
@@ -59,15 +58,88 @@ function endRitualMissing(input, cfg) {
       if ((e.type === 'user' || e.type === 'assistant') && !e.isSidechain && !e.isMeta) entries.push(e);
     } catch (e) { /* обрезанная первая строка хвоста */ }
   }
-  let last = -1;
+  return entries;
+}
+
+/**
+ * Номер последнего сообщения человека, если это слово конца сессии («стоп»), иначе -1.
+ * Второй заход хука (stop_hook_active) не считается: держим один раз, петли не будет.
+ */
+function stopIndex(input, entries, cfg) {
+  if (input.stop_hook_active) return -1;
   for (let i = entries.length - 1; i >= 0; i--) {
-    if (entries[i].type === 'user' && textOf(entries[i])) { last = i; break; }
+    if (entries[i].type !== 'user' || !textOf(entries[i])) continue;
+    const said = textOf(entries[i]).toLowerCase().replace(/[.!…\s]+$/, '');
+    return (cfg.stop_words || STOP_WORDS).includes(said) ? i : -1;
   }
-  if (last < 0) return false;
-  const said = textOf(entries[last]).toLowerCase().replace(/[.!…\s]+$/, '');
-  if (!(cfg.stop_words || STOP_WORDS).includes(said)) return false;
+  return -1;
+}
+
+function guardOn(cfg, key) {
+  return !(cfg.guard === false || (cfg.guard && cfg.guard[key] === false));
+}
+
+/** После «стоп» в ответе агента нет раздела «Промпт» — ритуал конца сессии не доведён. */
+function promptMissing(entries, last) {
   const answer = entries.slice(last + 1).filter(e => e.type === 'assistant').map(textOf).join('\n');
   return !/^#{1,3}\s*Промпт/m.test(answer);
+}
+
+/** git без оболочки и без приглашений пароля; ошибка — исключение. */
+function git(cwd, args) {
+  return cp.execFileSync('git', args, {
+    cwd, timeout: 4000, stdio: ['ignore', 'pipe', 'ignore'], encoding: 'utf-8', windowsHide: true,
+    env: Object.assign({}, process.env, { GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never' }),
+  }).trim();
+}
+
+/** Репозитории сессии: рабочая папка и папки файлов, которые агент правил (по хвосту записи). */
+function sessionRepos(entries, cwd) {
+  const dirs = new Set([cwd]);
+  for (const e of entries) {
+    if (e.type !== 'assistant' || !Array.isArray(e.message && e.message.content)) continue;
+    for (const c of e.message.content) {
+      const f = c && c.type === 'tool_use' && c.input && (c.input.file_path || c.input.notebook_path);
+      if (typeof f === 'string' && path.isAbsolute(f)) dirs.add(path.dirname(f));
+    }
+  }
+  const repos = new Map();
+  for (const d of dirs) {
+    if (repos.size >= MAX_REPOS) break;
+    try {
+      if (!fs.existsSync(d)) continue;
+      const top = path.resolve(git(d, ['rev-parse', '--show-toplevel']));
+      repos.set(top.toLowerCase(), top);
+    } catch (e) { /* не репозиторий */ }
+  }
+  return [...repos.values()];
+}
+
+/**
+ * Что в репозитории не доведено до сервера: правки отслеживаемых файлов без коммита и ветки,
+ * которые ушли вперёд или не запушены вовсе. Новые неотслеживаемые файлы не в счёт:
+ * это часто мусор, решать про него человеку. Без удалённого репозитория — только незакоммиченное.
+ */
+function gitLeftovers(repo) {
+  const out = [];
+  try {
+    const changed = git(repo, ['status', '--porcelain']).split('\n').filter(l => l && !l.startsWith('??'));
+    if (changed.length) out.push(changed.length + ' файл(ов) с правками без коммита');
+  } catch (e) { return out; }
+  try {
+    if (!git(repo, ['remote'])) return out;
+    const refs = git(repo, ['for-each-ref', '--format=%(refname:short)|%(upstream:short)|%(upstream:track)', 'refs/heads']);
+    for (const line of refs.split('\n').filter(Boolean)) {
+      const [branch, upstream, track] = line.split('|');
+      const ahead = /ahead (\d+)/.exec(track || '');
+      if (upstream && ahead) out.push('ветка ' + branch + ' впереди сервера на ' + ahead[1]);
+      else if (!upstream) {
+        const n = parseInt(git(repo, ['rev-list', '--count', branch, '--not', '--remotes']), 10) || 0;
+        if (n > 0) out.push('ветка ' + branch + ' не на сервере (' + n + ' коммит(ов))');
+      }
+    }
+  } catch (e) { /* сверка веток не критична */ }
+  return out;
 }
 
 function logEvent(cfg, row) {
@@ -85,15 +157,34 @@ try {
   if (!cfg) process.exit(0);
 
   const input = readStdin();
-  if (endRitualMissing(input, cfg)) {
-    logEvent(cfg, { event: 'guard', key: 'end_prompt', blocked: true,
-      session: String(input.session_id || '').slice(0, 8), project: path.basename(kit.projectDir(cfg, process.cwd())) });
-    console.log(JSON.stringify({
-      decision: 'block',
-      reason: 'Человек попросил закончить сессию, а в ответе нет раздела «## Промпт». Ритуал конца сессии ' +
-        'не доведён: пройди его шаги из правил и выведи «## Промпт» с текстом для начала следующей сессии.',
-    }));
-    process.exit(0);
+  const entries = readEntries(input);
+  const last = stopIndex(input, entries, cfg);
+  if (last >= 0) {
+    const session = String(input.session_id || '').slice(0, 8);
+    const project = path.basename(kit.projectDir(cfg, process.cwd()));
+    const reasons = [];
+    if (guardOn(cfg, 'end_prompt') && promptMissing(entries, last)) {
+      logEvent(cfg, { event: 'guard', key: 'end_prompt', blocked: true, session, project });
+      reasons.push('Человек попросил закончить сессию, а в ответе нет раздела «## Промпт». Ритуал конца сессии ' +
+        'не доведён: пройди его шаги из правил и выведи «## Промпт» с текстом для начала следующей сессии.');
+    }
+    if (guardOn(cfg, 'end_git')) {
+      const left = [];
+      for (const repo of sessionRepos(entries, process.cwd())) {
+        const l = gitLeftovers(repo);
+        if (l.length) left.push(repo.replace(/\\/g, '/') + ': ' + l.join('; '));
+      }
+      if (left.length) {
+        logEvent(cfg, { event: 'guard', key: 'end_git', blocked: true, session, project, repos: left.length });
+        reasons.push('В репозиториях сессии осталось недоведённое до сервера:\n- ' + left.join('\n- ') +
+          '\nЗакоммить свои правки поимённо (не всё подряд) и запушь. Чужое, незнакомое или то, что пушить ' +
+          'нельзя, не трогай, а назови в отчёте строкой на репозиторий: что запушено и почему остальное нет.');
+      }
+    }
+    if (reasons.length) {
+      console.log(JSON.stringify({ decision: 'block', reason: reasons.join('\n\n') }));
+      process.exit(0);
+    }
   }
 
   const today = new Date().toISOString().slice(0, 10);

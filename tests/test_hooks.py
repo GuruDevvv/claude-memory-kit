@@ -227,6 +227,41 @@ check("второй раз подряд не держит", not ritual([U("ст�
 check("служебная вставка в сообщении человека не мешает",
       ritual([U("стоп\n<system-reminder>что-то служебное</system-reminder>"), A("Готово.")]))
 
+# после «стоп» в репозиториях сессии не должно остаться незакоммиченного и незапушенного
+def g(cwd, *args):
+    return subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", "-c", "init.defaultBranch=master"]
+                          + list(args), cwd=cwd, capture_output=True, text=True)
+
+
+server, repo = os.path.join(box, "server.git"), os.path.join(box, "repo")
+g(box, "init", "--bare", server)
+g(box, "clone", server, repo)
+write(os.path.join(repo, "a.txt"), "1\n")
+g(repo, "add", "a.txt")
+g(repo, "commit", "-m", "первый")
+g(repo, "push", "-u", "origin", "master")
+EDIT = {"type": "assistant", "message": {"role": "assistant", "content": [
+    {"type": "tool_use", "name": "Edit", "input": {"file_path": os.path.join(repo, "a.txt")}}]}}
+DONE = A("Итог\n\n## Промпт\n> продолжи")
+check("git: всё запушено — «стоп» с «Промптом» проходит", not ritual([EDIT, U("стоп"), DONE]))
+write(os.path.join(repo, "a.txt"), "2\n")
+check("git: правленный файл без коммита — держит", ritual([EDIT, U("стоп"), DONE]))
+write(os.path.join(repo, "junk.tmp"), "x\n")
+g(repo, "commit", "-am", "второй")
+check("git: коммит не запушен — держит", ritual([EDIT, U("стоп"), DONE]))
+g(repo, "push")
+check("git: новый неотслеживаемый файл не держит", not ritual([EDIT, U("стоп"), DONE]))
+g(repo, "checkout", "-b", "feature")
+write(os.path.join(repo, "b.txt"), "b\n")
+g(repo, "add", "b.txt")
+g(repo, "commit", "-m", "ветка")
+g(repo, "checkout", "master")
+check("git: ветка без копии на сервере — держит", ritual([EDIT, U("стоп"), DONE]))
+check("git: без «стоп» репозитории не сверяет", not ritual([EDIT, U("сделай кнопку"), A("сделал")]))
+check("git: второй раз подряд не держит", not ritual([EDIT, U("стоп"), DONE], stop_hook_active=True))
+g(repo, "push", "-u", "origin", "feature")
+check("git: всё на сервере — снова проходит", not ritual([EDIT, U("стоп"), DONE]))
+
 ctx = recall("subagent", {"session_id": sid, "cwd": os.path.join(proj, "src")})
 check("помощник получает записку проекта и команду поиска", "записка магазина" in ctx and "memory_search.py" in ctx
       and len(ctx) <= 3000, ctx[:300])
