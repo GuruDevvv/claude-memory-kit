@@ -5,7 +5,8 @@
  *   2) HANDOFF.md текущего проекта не обновлялся больше двух часов.
  * Не блокирует и не заставляет: только строка-напоминание. Не чаще раза в день.
  * После «стоп» один раз держит конец хода, если нет раздела «Промпт» или в репозитории текущего
- * проекта остались правки без коммита и незапушенные ветки.
+ * проекта остались правки без коммита и незапушенные ветки, или в другом репозитории лежат
+ * незапушенные коммиты, которые сессия сделала сама.
  * На коротком разговоре молчит — длину сессии оценивает по размеру её записи.
  */
 const fs = require('fs');
@@ -105,6 +106,70 @@ function projectRepo(cfg, cwd) {
   }
 }
 
+const MAX_REPOS = 8; // больше чужих репозиториев за сессию не сверяем: хук держит конец хода
+
+/** Путь из команды оболочки в обычный: /e/VibeCoding → E:/VibeCoding. */
+function shellPath(p) {
+  const m = /^\/([a-zA-Z])(\/.*)?$/.exec(p);
+  return m ? m[1].toUpperCase() + ':' + (m[2] || '/') : p;
+}
+
+/**
+ * Другие репозитории, где сессия сама делала коммиты: папки файлов, которые агент правил,
+ * и папки из команд с `git commit` (`cd X`, `git -C X`). Сверяются только коммиты,
+ * сделанные после начала сессии, и только на ветках с копией на сервере.
+ * Незакоммиченное там не в счёт: это могут быть чужие правки параллельных сессий.
+ */
+function otherCommitRepos(entries, since, skip) {
+  const dirs = new Set();
+  for (const e of entries) {
+    if (e.type !== 'assistant' || !Array.isArray(e.message && e.message.content)) continue;
+    for (const c of e.message.content) {
+      if (!c || c.type !== 'tool_use' || !c.input) continue;
+      const f = c.input.file_path || c.input.notebook_path;
+      if (typeof f === 'string' && path.isAbsolute(f)) dirs.add(path.dirname(f));
+      const cmd = c.input.command;
+      if (typeof cmd === 'string' && /git\b[^\n]*\bcommit\b/.test(cmd)) {
+        for (const m of cmd.matchAll(/(?:\bcd|\bgit\s+-C)\s+("([^"]+)"|'([^']+)'|([^\s;&|]+))/g)) {
+          dirs.add(shellPath(m[2] || m[3] || m[4]));
+        }
+      }
+    }
+  }
+  const repos = new Map();
+  for (const d of dirs) {
+    if (repos.size >= MAX_REPOS) break;
+    try {
+      if (!path.isAbsolute(d) || !fs.existsSync(d)) continue;
+      const top = path.resolve(git(d, ['rev-parse', '--show-toplevel']));
+      if (top.toLowerCase() !== (skip || '').toLowerCase()) repos.set(top.toLowerCase(), top);
+    } catch (e) { /* не репозиторий */ }
+  }
+  const out = [];
+  for (const repo of repos.values()) {
+    try {
+      const refs = git(repo, ['for-each-ref', '--format=%(refname:short)|%(upstream:short)', 'refs/heads']);
+      for (const line of refs.split('\n').filter(Boolean)) {
+        const [branch, upstream] = line.split('|');
+        if (!upstream) continue;
+        const n = parseInt(git(repo, ['rev-list', '--count', '--since=' + since, upstream + '..' + branch]), 10) || 0;
+        if (n > 0) out.push(repo.replace(/\\/g, '/') + ': ветка ' + branch + ', коммитов этой сессии не на сервере: ' + n);
+      }
+    } catch (e) { /* сверка не критична */ }
+  }
+  return out;
+}
+
+/** Начало сессии: время создания её записи, иначе первая метка в хвосте, иначе сутки назад. */
+function sessionStart(input, entries) {
+  try {
+    const t = fs.statSync(input.transcript_path).birthtimeMs;
+    if (t > 0) return new Date(t).toISOString();
+  } catch (e) { /* нет записи */ }
+  const first = entries.find(e => e.timestamp);
+  return first ? first.timestamp : new Date(Date.now() - 86400000).toISOString();
+}
+
 /**
  * Что в репозитории не доведено до сервера: правки отслеживаемых файлов без коммита и ветки,
  * которые ушли вперёд или не запушены вовсе. Новые неотслеживаемые файлы не в счёт:
@@ -167,6 +232,13 @@ try {
           left.join('; ') + '.\nЗакоммить свои правки поимённо (не всё подряд) и запушь. Чужое, незнакомое ' +
           'или то, что пушить нельзя, не трогай, а назови в отчёте: что запушено и почему остальное нет. ' +
           'Другие репозитории по «стоп» не коммить и не пушь.');
+      }
+      const mine = otherCommitRepos(entries, sessionStart(input, entries), repo);
+      if (mine.length) {
+        logEvent(cfg, { event: 'guard', key: 'end_git', blocked: true, session, project, other: mine.length });
+        reasons.push('В других репозиториях остались коммиты, сделанные за эту сессию, но не отправленные на сервер:\n- ' +
+          mine.join('\n- ') + '\nЕсли коммиты твои — запушь (сервер ушёл вперёд — сначала слей его изменения). ' +
+          'Незакоммиченное там не трогай. Чужие коммиты не пушь, назови в отчёте.');
       }
     }
     if (reasons.length) {

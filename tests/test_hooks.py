@@ -267,6 +267,18 @@ check("git: запуск из подпапки проекта сверяет е�
 g(repo, "push", "-u", "origin", "feature")
 check("git: всё на сервере — снова проходит", not ritual([EDIT, U("стоп"), DONE], cwd=repo))
 
+# сессия открыта в другом проекте, но сама коммитила в этот репозиторий
+write(os.path.join(repo, "a.txt"), "3\n")
+check("чужой репо: только незакоммиченное не держит", not ritual([EDIT, U("стоп"), DONE]))
+g(repo, "commit", "-am", "из другой сессии")
+check("чужой репо: свой незапушенный коммит держит", ritual([EDIT, U("стоп"), DONE]))
+CMT = {"type": "assistant", "message": {"role": "assistant", "content": [{"type": "tool_use", "name": "Bash", "input": {
+    "command": 'cd "%s" && git add a.txt && git commit -m x' % repo.replace("\\", "/")}}]}}
+check("чужой репо: найден по команде коммита", ritual([CMT, U("стоп"), DONE]))
+check("чужой репо: без следов сессии в нём не держит", not ritual([U("стоп"), DONE]))
+g(repo, "push")
+check("чужой репо: после пуша проходит", not ritual([EDIT, U("стоп"), DONE]))
+
 ctx = recall("subagent", {"session_id": sid, "cwd": os.path.join(proj, "src")})
 check("помощник получает записку проекта и команду поиска", "записка магазина" in ctx and "memory_search.py" in ctx
       and len(ctx) <= 3000, ctx[:300])
