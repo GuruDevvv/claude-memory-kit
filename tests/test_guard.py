@@ -87,5 +87,21 @@ check("битое выражение в своём запрете хук не р
       hook.guard({"tool_name": "Bash", "tool_input": {"command": "ls"}},
                  {"guards": [{"key": "x", "pattern": "(", "message": "m"}]}) is None)
 
+# свой запрет с text_pattern: запуск ловит pattern (без кавычек), тему задания — text_pattern (с кавычками)
+img = {"guards": [{"key": "codex_image",
+                   "pattern": r"(?:^|[;&|(]\s*|\n\s*)(?:\S*[\\/])?codex(?:\.exe|\.cmd)?\s[^;&|\n]*?\bexec\b",
+                   "text_pattern": r"image_gen|imagegen|изображени|картинк|нарисуй|\.(?:png|jpe?g|webp)\b",
+                   "message": "m"}]}
+for c in ['codex exec --skip-git-repo-check "Сгенерируй изображение кота. Сохрани как out.png"',
+          "cd mock && codex exec -m gpt-6.1-sol 'нарисуй картинку'",
+          'C:/bin/codex.cmd --search exec "use image_gen"']:
+    check("картинка через codex — останавливает: " + c, bash(c, img) == "codex_image", bash(c, img))
+for c in ['python codex_img.py "нарисуй кота" out.png',
+          'codex exec -s read-only "проверь дифф на ошибки"',
+          "echo 'codex exec нарисуй картинку'",
+          'git commit -m "запрет: codex exec на картинку"',
+          'codex review "картинка"']:
+    check("пропускает: " + c, bash(c, img) is None, bash(c, img))
+
 print("\nитого: %d из %d" % (sum(results), len(results)))
 sys.exit(0 if all(results) else 1)

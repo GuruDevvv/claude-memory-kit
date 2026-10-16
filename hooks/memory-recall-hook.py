@@ -74,7 +74,8 @@ GROUPS = [
 # забывает, отказ хука — нет. Свои запреты — ключом "guards" в memory-kit.json, выключатель — "guard": false
 # целиком или {"<key>": false} по одному.
 #   tool — по имени инструмента; pattern — по тексту команды (кавычки вырезаны, чтобы не ловить слова
-#   из сообщения коммита); require + when_text — у инструмента должно быть поле с таким значением,
+#   из сообщения коммита); text_pattern — по полному тексту команды вместе с кавычками, вместе с pattern:
+#   «запуск X» ловит pattern, «и в задании про Y» — text_pattern; require + when_text — у инструмента должно быть поле с таким значением,
 #   если в его тексте встречается when_text.
 GUARDS = [
     {"key": "git_add_all", "tool": r"^(?:Bash|PowerShell|shell)$",
@@ -158,13 +159,15 @@ def guard(data, cfg):
                 continue
             if g.get("pattern") and not re.search(g["pattern"], command, re.I | re.M):
                 continue
+            if g.get("text_pattern") and not re.search(g["text_pattern"], ti.get("command") or "", re.I | re.M):
+                continue
             if g.get("require"):
                 text = " ".join(str(v) for v in ti.values() if isinstance(v, str))
                 if g.get("when_text") and not re.search(g["when_text"], text, re.I):
                     continue
                 if all(str(ti.get(k, "")).lower() == str(v).lower() for k, v in g["require"].items()):
                     continue
-            elif not g.get("pattern"):
+            elif not (g.get("pattern") or g.get("text_pattern")):
                 continue                      # запрет без условия не срабатывает никогда
             return g["key"], g.get("message") or "Остановлено правилом «%s»." % g["key"]
         except Exception:
