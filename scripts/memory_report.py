@@ -145,7 +145,9 @@ def ask_model(batch, command):
                                       "--strict-mcp-config", "--disable-slash-commands", "--tools", "",
                                       "--system-prompt", "Ты размечаешь реплики. Отвечаешь только массивом JSON."],
                            input=LABEL_PROMPT + "\n".join(lines), capture_output=True, text=True, encoding="utf-8",
-                           errors="replace", timeout=300, cwd=tempfile.gettempdir())
+                           errors="replace", timeout=300, cwd=tempfile.gettempdir(),
+                           # без своей консоли: из фонового запуска без окна каждый claude.exe иначе открывает чёрное окно
+                           creationflags=0x08000000 if os.name == "nt" else 0)
         m = re.search(r"\[.*\]", r.stdout, re.S)
         rows = json.loads(m.group(0)) if m else None
     except Exception:
