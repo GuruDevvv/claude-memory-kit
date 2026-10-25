@@ -79,10 +79,31 @@ function guardOn(cfg, key) {
   return !(cfg.guard === false || (cfg.guard && cfg.guard[key] === false));
 }
 
-/** После «стоп» в ответе агента нет раздела «Промпт» — ритуал конца сессии не доведён. */
-function promptMissing(entries, last) {
-  const answer = entries.slice(last + 1).filter(e => e.type === 'assistant').map(textOf).join('\n');
-  return !/^#{1,3}\s*Промпт/m.test(answer);
+const PROMPT_RE = /^#{1,3}\s*Промпт/m;
+const FLUSH_WAIT_MS = 1500;
+
+/** Есть ли «Промпт» в ответах агента после последнего сообщения человека с текстом. */
+function promptAfterLastUser(entries) {
+  for (let i = entries.length - 1; i >= 0; i--) {
+    if (entries[i].type === 'user' && textOf(entries[i])) {
+      return PROMPT_RE.test(entries.slice(i + 1).filter(e => e.type === 'assistant').map(textOf).join('\n'));
+    }
+  }
+  return false;
+}
+
+/**
+ * После «стоп» в ответе агента нет раздела «Промпт» — ритуал конца сессии не доведён.
+ * Хук запускается раньше, чем последний ответ попадает в запись сессии (замер 26.10.2026:
+ * «## Промпт» был в ответе, хук его не увидел, агент выводил промпт второй раз). Поэтому сперва
+ * последний ответ из входа хука (`last_assistant_message`), затем запись, а не нашлось — запись
+ * ещё раз после паузы.
+ */
+function promptMissing(input, entries) {
+  if (typeof input.last_assistant_message === 'string' && PROMPT_RE.test(input.last_assistant_message)) return false;
+  if (promptAfterLastUser(entries)) return false;
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, FLUSH_WAIT_MS);
+  return !promptAfterLastUser(readEntries(input));
 }
 
 /** git без оболочки и без приглашений пароля; ошибка — исключение. */
@@ -218,7 +239,7 @@ try {
     const session = String(input.session_id || '').slice(0, 8);
     const project = path.basename(kit.projectDir(cfg, process.cwd()));
     const reasons = [];
-    if (guardOn(cfg, 'end_prompt') && promptMissing(entries, last)) {
+    if (guardOn(cfg, 'end_prompt') && promptMissing(input, entries)) {
       logEvent(cfg, { event: 'guard', key: 'end_prompt', blocked: true, session, project });
       reasons.push('Человек попросил закончить сессию, а в ответе нет раздела «## Промпт». Ритуал конца сессии ' +
         'не доведён: пройди его шаги из правил и выведи «## Промпт» с текстом для начала следующей сессии.');
