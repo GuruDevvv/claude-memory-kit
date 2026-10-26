@@ -1,28 +1,28 @@
-# Текст для агента
+# Prompt for the agent
 
-Откройте Claude Code или Codex в корневой папке своих проектов и вставьте текст ниже.
+Open Claude Code or Codex in the root folder of your projects and paste the text below.
 
 ```
-Поставь мне memory-kit — память между сессиями.
+Install memory-kit for me: memory that carries over between sessions.
 
-1. Склонируй https://github.com/GuruDevvv/claude-memory-kit в подпапку _memory-kit
-   текущей папки и прочитай там README.md, INSTALL.md и docs/GUIDE.md.
-2. Спроси меня: какая папка у меня корневая для проектов (предложи текущую)
-   и в каком проекте завести первую записку HANDOFF.md.
-3. Проверь, что стоят python, node и git. Чего не хватает — скажи и остановись.
-4. Посмотри, есть ли у меня уже свои хуки, свои правила про память или своя папка памяти.
-   Есть — ставь по INSTALL.md шаг за шагом и ничего моего не заменяй без вопроса.
-   Нет — запусти install.py с флагом --dry-run и перескажи простыми словами, какие файлы
-   появятся и какие изменятся. Жди моего «да», потом запусти без --dry-run с флагом --project.
-5. В обоих случаях запусти scripts/kit_check.py из папки агента с флагом --kit и покажи итог.
-   Пока последняя строка не «Всё на месте», установка не готова.
-6. Открой шапку общей памяти MEMORY.head.md, спроси у меня 2–3 строки обо мне
-   (кто я, как со мной говорить) и запиши их в раздел «Про владельца».
-7. Скажи, что делать дальше: открыть новую сессию в папке проекта; в Codex набрать /hooks
-   и подтвердить хуки; в конце работы сказать «стоп». Папку _memory-kit после установки
-   можно удалить — спроси меня.
+1. Clone https://github.com/GuruDevvv/claude-memory-kit into a _memory-kit subfolder
+   of the current folder and read README.md, INSTALL.md and docs/GUIDE.md there.
+2. Ask me which folder is the root of my projects (suggest the current one)
+   and in which project to start the first HANDOFF.md note.
+3. Check that python, node and git are installed. If something is missing, tell me and stop.
+4. Check whether I already have my own hooks, my own memory rules or my own memory folder.
+   If I do, install step by step following INSTALL.md and replace nothing of mine without asking.
+   If I don't, run install.py with --dry-run and tell me in plain words which files
+   will appear and which will change. Wait for my "yes", then run it without --dry-run, with --project.
+5. Either way, run scripts/kit_check.py from the agent folder with --kit and show me the result.
+   Until the last line says "Всё на месте." ("All in place."), the install is not done.
+6. Open the shared memory header MEMORY.head.md, ask me for 2–3 lines about myself
+   (who I am, how to talk to me) and write them into the owner section ("Про владельца").
+7. Tell me what to do next: open a new session in the project folder; in Codex type /hooks
+   and approve the hooks; at the end of the work say "stop". The _memory-kit folder can be
+   deleted after the install; ask me.
 
-Ничего не удаляй. Мои существующие CLAUDE.md, AGENTS.md и настройки не переписывай:
-дописывай только раздел набора и сохраняй копии. Разрешения себе не выдавай, покажи мне,
-что вписать.
+Delete nothing. Do not rewrite my existing CLAUDE.md, AGENTS.md or settings:
+only add the kit's section and keep backups. Do not grant yourself permissions; show me
+what to add.
 ```

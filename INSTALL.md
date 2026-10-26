@@ -1,68 +1,68 @@
-# Установка силами агента
+# Installing with an agent
 
-Этот файл читает агент: Claude Code или Codex. Человек говорит ему «поставь memory-kit
-по INSTALL.md», агент делает шаги ниже и в конце запускает проверку.
+This file is read by the agent: Claude Code or Codex. A person tells it "install memory-kit
+following INSTALL.md", the agent does the steps below and runs the check at the end.
 
-Зачем так. Установщик `install.py` рассчитан на чистую машину. Если у человека уже есть свои хуки,
-свои правила и своя папка памяти, скрипт подстроиться не умеет, а агент умеет: он смотрит, что
-стоит, и вписывает новое рядом. Зато итог проверяет скрипт, а не агент: `scripts/kit_check.py`
-отвечает одинаково при каждом запуске.
+Why this way. The installer `install.py` is built for a clean machine. If the person already has
+their own hooks, rules and memory folder, the script cannot adapt to them, but an agent can: it
+looks at what is there and adds the new parts alongside. The result, though, is checked by a
+script, not by the agent: `scripts/kit_check.py` gives the same answer every time it runs.
 
-Чистая машина без своих настроек? Быстрее запустить `install.py`, как описано в `README.md`.
+Clean machine with no settings of your own? It is faster to run `install.py` as described in `README.md`.
 
-## Правила для агента на время установки
+## Rules for the agent during the install
 
-1. Ничего не удаляй. Перед правкой чужого файла сохрани копию рядом: `<имя>.bak-ГГГГММДД`.
-2. Файлы набора копируй как есть, внутри не правь. Нужно своё поведение? Заведи отдельный хук
-   со своим именем. Поправленный файл набора проверка назовёт расхождением.
-3. Разрешения себе не выдавай. Нужна строка в разделе `permissions` или в `config.toml`? Покажи её
-   человеку и попроси вписать самому.
-4. Файлы входа (`auth.json`, `.credentials.json` и подобные) не читай и не копируй.
-5. Перед записью в настройки агента покажи человеку, что изменится, и дождись «да».
-6. Слово «готово» говори только после того, как проверка ответила «Всё на месте».
+1. Delete nothing. Before editing someone else's file, save a copy next to it: `<name>.bak-YYYYMMDD`.
+2. Copy the kit's files as they are and do not edit them. Need different behaviour? Add a separate
+   hook with its own name. The check will report an edited kit file as a mismatch.
+3. Do not grant yourself permissions. Need a line in `permissions` or in `config.toml`? Show it
+   to the person and ask them to add it themselves.
+4. Do not read or copy login files (`auth.json`, `.credentials.json` and the like).
+5. Before writing to the agent's settings, show the person what will change and wait for a "yes".
+6. Say "done" only after the check has answered "Всё на месте." ("All in place.").
 
-## Шаг 1. Осмотр
+## Step 1. Survey
 
-Выясни и коротко перескажи человеку:
+Find out and briefly tell the person:
 
-- стоят ли `python` (3.8 или новее), `node` и `git`. Чего-то нет? Скажи и остановись;
-- какие агенты есть: папки `~/.claude` и `~/.codex`;
-- есть ли в папке агента `memory-kit.json`. Есть — это обновление, настройки сохраняются, переходи к шагу 3;
-- какие хуки уже прописаны: `~/.claude/settings.json`, `~/.codex/hooks.json`;
-- есть ли в `hooks/` и `scripts/` папки агента файлы с именами из шага 3;
-- где человек уже держит память и правила, если держит.
+- whether `python` (3.8 or newer), `node` and `git` are installed. Something missing? Say so and stop;
+- which agents are present: the folders `~/.claude` and `~/.codex`;
+- whether the agent folder has a `memory-kit.json`. If it does, this is an update: the settings are kept, go to step 3;
+- which hooks are already configured: `~/.claude/settings.json`, `~/.codex/hooks.json`;
+- whether the agent folder's `hooks/` and `scripts/` contain files with the names from step 3;
+- where the person already keeps memory and rules, if anywhere.
 
-## Шаг 2. Четыре адреса
+## Step 2. Four locations
 
-| Ключ | Что это | Значение по умолчанию |
+| Key | What it is | Default |
 |---|---|---|
-| `root` | папка, внутри которой лежат проекты | спроси у человека |
-| `central` | общая память для всех проектов | `~/.agent-memory/central` |
-| `projects_dir` | память отдельных проектов | `~/.claude/projects`; без Claude Code: `~/.agent-memory/projects` |
-| `sessions_dir` | архив разговоров | папка `sessions` рядом с `central` |
+| `root` | the folder that holds the projects | ask the person |
+| `central` | shared memory for all projects | `~/.agent-memory/central` |
+| `projects_dir` | per-project memory | `~/.claude/projects`; without Claude Code: `~/.agent-memory/projects` |
+| `sessions_dir` | conversation archive | a `sessions` folder next to `central` |
 
-У человека уже есть папка памяти? Оставь её на месте и впиши её адрес. Переезд набору не нужен.
+The person already has a memory folder? Leave it where it is and enter its path. The kit does not need it moved.
 
-Одна оговорка про `central` внутри `~/.claude`. Работать будет, но Claude Code считает файлы там
-чувствительными и при записи из другого проекта спрашивает подтверждение. Скажи об этом человеку,
-решает он.
+One caveat about putting `central` inside `~/.claude`. It works, but Claude Code treats files there
+as sensitive and asks for confirmation when writing to them from another project. Tell the person;
+it is their call.
 
-## Шаг 3. Файлы
+## Step 3. Files
 
-Скопируй из папки набора в папку агента. Для двух агентов повтори для каждой папки.
+Copy from the kit folder into the agent folder. With two agents, repeat for each folder.
 
-| Откуда | Куда | Файлы |
+| From | To | Files |
 |---|---|---|
-| `hooks/` | `<папка агента>/hooks/` | `kit.js`, `session-start-context.js`, `session-summary-check.js`, `memory-index-hook.py`, `memory-recall-hook.py` |
-| `scripts/` | `<папка агента>/scripts/` | `memory_index.py`, `memory_search.py`, `session_archive.py`, `project_index.py`, `kit_check.py`, `memory_report.py`, `memory_upkeep.py`, `find-zombies.ps1` |
+| `hooks/` | `<agent folder>/hooks/` | `kit.js`, `session-start-context.js`, `session-summary-check.js`, `memory-index-hook.py`, `memory-recall-hook.py` |
+| `scripts/` | `<agent folder>/scripts/` | `memory_index.py`, `memory_search.py`, `session_archive.py`, `project_index.py`, `kit_check.py`, `memory_report.py`, `memory_upkeep.py`, `find-zombies.ps1` |
 
-Файл с таким именем уже лежит и отличается? Это своя версия человека. Сохрани копию, сравни
-с файлом набора и выпиши, что в ней есть сверх набора. Каждое отличие покажи человеку: либо оно
-больше не нужно, либо переезжает в отдельный хук со своим именем. После этого положи файл набора.
+A file with the same name is already there and differs? That is the person's own version. Save a copy,
+compare it with the kit's file and list what it has beyond the kit. Show each difference to the person:
+either it is no longer needed, or it moves into a separate hook with its own name. Then put the kit's file in place.
 
-## Шаг 4. Настройки
+## Step 4. Settings
 
-Запиши `<папка агента>/memory-kit.json`. Хуки ищут его рядом с папкой `hooks`. Без него они молчат.
+Write `<agent folder>/memory-kit.json`. The hooks look for it next to the `hooks` folder. Without it they stay silent.
 
 ```json
 {
@@ -78,131 +78,136 @@
 }
 ```
 
-| Ключ | Что делает |
+| Key | What it does |
 |---|---|
-| `tool` | `claude` или `codex` |
-| `kit_dir` | папка набора. С ней проверка сверяет установленные файлы с набором при каждом запуске |
-| `inject_index` | хук начала сессии кладёт в контекст оглавление общей памяти. У человека оно уже подгружается иначе? Ставь `false` |
-| `inject_project_index` | то же для памяти проекта. Claude Code подгружает её сам, поэтому у него `false`, у Codex `true` |
-| `sync_on_start` | в начале сессии забрать с сервера новые коммиты в папке, где открыт агент. Файлы обновляются, только если нет несохранённых правок и не нужно слияние |
-| `journal_entries` | сколько последних записей журнала проекта показывать на старте |
-| `journal_keep` | сколько записей держать в журнале, остальное уходит в `projects/archive/`; по умолчанию 5, `0` — не обрезать |
-| `start_max_chars` | потолок текста, который хук отдаёт на старте. У Codex ставь `5800`: больше он к модели не пропускает и вырезает середину. Тогда приходят записка проекта, одна запись журнала, раздел «Всегда» и адрес полного оглавления. У Claude Code ключ не нужен |
-| `sessions_dir` | свой адрес архива разговоров, если он не рядом с `central` |
-| `project_index` | `false`: список проектов `PROJECT_INDEX.md` в конце хода не собирать. Нужно, если его уже ведёт другое средство |
-| `recall_block` | `false` выключает остановку перед первым пушем и первой командой на сервер |
-| `recall` | свои темы и признаки для подсказки правил, формат в начале `hooks/memory-recall-hook.py` |
-| `guard` | запреты: хук останавливает `git add -A`, `git add .`, `git commit -a`, конец сессии без раздела «Промпт» после слова «стоп» и конец сессии с незакоммиченными правками или незапушенными ветками в репозитории текущего проекта, а также с незапушенными коммитами этой сессии в других репозиториях. `false` выключает все, `{"git_add_all": false}`, `{"end_prompt": false}` или `{"end_git": false}` по одному |
-| `guards` | свои запреты, формат в начале `hooks/memory-recall-hook.py`. Запрет на другой инструмент требует ещё и строки в хуках: `PreToolUse` с именем этого инструмента и той же командой `memory-recall-hook.py pre` |
-| `label` | `true`: раз в сутки в конце хода отдельным процессом размечать новые реплики человека моделью Haiku (поправка агенту или нет) и обновлять отчёт `reviews/metrics.md`. Тратит лимит Claude Code, около одного короткого обращения на 40 реплик, поэтому по умолчанию выключено. Спроси человека |
-| `stop_words` | слова, которыми человек заканчивает сессию. По умолчанию: стоп, всё, завершай, пока, stop |
-| `metrics` | `false` выключает журнал срабатываний `<central>/.metrics/events.jsonl`. В него пишется, какие правила показаны и что остановлено; текста команд там нет. Сводка по неделям: `scripts/memory_report.py` |
+| `tool` | `claude` or `codex` |
+| `kit_dir` | the kit folder. The check uses it to compare installed files with the kit on every run |
+| `inject_index` | the session-start hook puts the shared memory index into context. The person already loads it another way? Set `false` |
+| `inject_project_index` | the same for project memory. Claude Code loads it on its own, so `false` there, `true` for Codex |
+| `sync_on_start` | at session start, pull new commits from the server in the folder the agent is opened in. Files are updated only if there are no unsaved edits and no merge is needed |
+| `journal_entries` | how many recent project journal entries to show at start |
+| `journal_keep` | how many entries to keep in the journal; the rest move to `projects/archive/`. Default 5, `0` means never trim |
+| `start_max_chars` | a cap on the text the hook hands over at start. For Codex set `5800`: it passes no more than that to the model and cuts out the middle. You then get the project note, one journal entry, the "Всегда" ("Always") section and the address of the full index. Claude Code does not need this key |
+| `sessions_dir` | a custom location for the conversation archive, if it is not next to `central` |
+| `project_index` | `false`: do not build the project list `PROJECT_INDEX.md` at the end of a turn. Useful if another tool already maintains it |
+| `recall_block` | `false` turns off the pause before the first push and the first server command |
+| `recall` | your own topics and triggers for rule hints; format at the top of `hooks/memory-recall-hook.py` |
+| `guard` | blocks: the hook stops `git add -A`, `git add .`, `git commit -a`; ending a session after the stop word without a "Промпт" ("Prompt") section; and ending a session with uncommitted edits or unpushed branches in the current project's repository, or with this session's unpushed commits in other repositories. `false` turns them all off; `{"git_add_all": false}`, `{"end_prompt": false}` or `{"end_git": false}` one at a time |
+| `guards` | your own blocks; format at the top of `hooks/memory-recall-hook.py`. A block on another tool also needs a hook line: `PreToolUse` with that tool's name and the same `memory-recall-hook.py pre` command |
+| `label` | `true`: once a day, at the end of a turn, a separate process has the Haiku model label the person's new messages (a correction to the agent or not) and updates the `reviews/metrics.md` report. It spends Claude Code quota, about one short call per 40 messages, so it is off by default. Ask the person |
+| `stop_words` | words the person ends a session with. Default: стоп, всё, завершай, пока, stop |
+| `metrics` | `false` turns off the event log `<central>/.metrics/events.jsonl`. It records which rules were shown and what was blocked; command text is not stored. Weekly summary: `scripts/memory_report.py` |
 
-При обновлении файл не переписывай: добавь недостающие ключи, остальное оставь.
+On an update, do not rewrite the file: add the missing keys and leave the rest.
 
-## Шаг 5. Каркас памяти
+## Step 5. Memory skeleton
 
-В `central` должны быть папки `feedback`, `ref`, `projects`, `plans`, `research`, `reviews`
-и файл `MEMORY.head.md`. Чего нет, создай; шапку возьми из `templates/MEMORY.head.md`.
-В пустую папку `feedback` положи `templates/feedback_example.md` как образец. Готовую память не трогай.
+`central` must contain the folders `feedback`, `ref`, `projects`, `plans`, `research`, `reviews`
+and the file `MEMORY.head.md`. Create what is missing; take the header from `templates/MEMORY.head.md`.
+Put `templates/feedback_example.md` into an empty `feedback` folder as a sample. Do not touch existing memory.
 
-## Шаг 6. Хуки
+## Step 6. Hooks
 
-Допиши хуки рядом с теми, что уже есть. Чужие не меняй и не переставляй.
+Add the hooks next to the ones already there. Do not change or reorder anyone else's.
 
-**Claude Code**, файл `~/.claude/settings.json`, раздел `hooks`:
+**Claude Code**, file `~/.claude/settings.json`, section `hooks`:
 
-| Событие | Для каких инструментов | Команда |
+| Event | For which tools | Command |
 |---|---|---|
-| `SessionStart` | все | `node <папка агента>/hooks/session-start-context.js` |
-| `Stop` | все | `node <папка агента>/hooks/session-summary-check.js` |
-| `Stop` | все | `python <папка агента>/hooks/memory-index-hook.py stop`, ожидание 60 с |
-| `PostToolUse` | `Write\|Edit\|MultiEdit` | `python <папка агента>/hooks/memory-index-hook.py post`, ожидание 30 с |
-| `PreToolUse` | `Bash\|PowerShell` | `python <папка агента>/hooks/memory-recall-hook.py pre`, ожидание 10 с |
-| `UserPromptSubmit` | все | `python <папка агента>/hooks/memory-recall-hook.py prompt`, ожидание 10 с |
-| `SubagentStart` | все | `python <папка агента>/hooks/memory-recall-hook.py subagent`, ожидание 10 с |
-| `PreCompact` | все | `node <папка агента>/hooks/session-start-context.js precompact`, ожидание 10 с |
+| `SessionStart` | all | `node <agent folder>/hooks/session-start-context.js` |
+| `Stop` | all | `node <agent folder>/hooks/session-summary-check.js` |
+| `Stop` | all | `python <agent folder>/hooks/memory-index-hook.py stop`, timeout 60 s |
+| `PostToolUse` | `Write\|Edit\|MultiEdit` | `python <agent folder>/hooks/memory-index-hook.py post`, timeout 30 s |
+| `PreToolUse` | `Bash\|PowerShell` | `python <agent folder>/hooks/memory-recall-hook.py pre`, timeout 10 s |
+| `UserPromptSubmit` | all | `python <agent folder>/hooks/memory-recall-hook.py prompt`, timeout 10 s |
+| `SubagentStart` | all | `python <agent folder>/hooks/memory-recall-hook.py subagent`, timeout 10 s |
+| `PreCompact` | all | `node <agent folder>/hooks/session-start-context.js precompact`, timeout 10 s |
 
-**Codex**, файл `~/.codex/hooks.json`: все строки, кроме `PostToolUse` и `PreCompact`; у `PreToolUse` в графе инструментов
-только `Bash` (так Codex называет команды оболочки). Новые хуки Codex пропускает,
-пока человек не подтвердит их сам: в консольном Codex набрать `/hooks` и подтвердить. Скажи ему об этом.
+**Codex**, file `~/.codex/hooks.json`: every row except `PostToolUse` and `PreCompact`; for `PreToolUse` the tools column
+is just `Bash` (that is what Codex calls shell commands). Codex skips new hooks until the person
+approves them: in the Codex console, type `/hooks` and approve. Tell the person.
 
-Пути пиши полные. На Windows годятся прямые слэши. Вместо `python` поставь ту команду, которой
-Python запускается на этой машине.
+Use full paths. On Windows, forward slashes are fine. Replace `python` with whatever command
+starts Python on this machine.
 
-У человека уже есть свой хук на то же событие с тем же назначением (например, своя записка на старте)?
-Два хука дадут двойной текст в контексте. Покажи оба и спроси, какой оставить.
+The person already has a hook on the same event for the same purpose (say, their own note at start)?
+Two hooks will put the text into context twice. Show both and ask which one to keep.
 
-## Шаг 7. Раздел правил
+## Step 7. Rules section
 
-Агент должен знать, где лежит память и как в неё писать. Образец текста: `templates/instructions.md`
-для главного файла правил (`~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md`) и `templates/root-rules.md`
-для файла правил в корне проектов. Раздел ставится между строками `<!-- memory-kit:start -->`
-и `<!-- memory-kit:end -->`, так его потом легко найти и обновить.
+The agent has to know where memory lives and how to write to it. Sample text: `templates/instructions.md`
+for the main rules file (`~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md`) and `templates/root-rules.md`
+for the rules file at the projects root. The section goes between the lines `<!-- memory-kit:start -->`
+and `<!-- memory-kit:end -->`, so it is easy to find and update later.
 
-Подстановки в образце:
+The templates are written in Russian. If the person works in another language, translate the section
+for them, keeping the file names, paths and the quoted values the hooks look for ("Промпт", "Всегда").
 
-| Метка | Что вписать |
+Placeholders in the sample:
+
+| Placeholder | What to put in |
 |---|---|
-| `{{CENTRAL}}`, `{{PROJECTS_DIR}}`, `{{ROOT}}` | адреса из шага 2 |
-| `{{ROOT_RULES}}` | путь к файлу правил в корне проектов |
-| `{{SEARCH}}` | команда поиска: `python <папка агента>/scripts/memory_search.py` |
-| `{{AUTOLOAD}}` | два-три предложения о том, что попадает в контекст само: оглавление общей памяти кладёт хук начала сессии, память проекта Claude Code подгружает сам |
-| `{{HOOKCHECK}}` | правило: в начале сессии найти в контексте строку `memory-kit: хуки работают`; строки нет — сказать человеку, что хуки не сработали |
-| `{{ZOMBIES}}` | как в конце сессии искать брошенные фоновые процессы: на Windows `scripts/find-zombies.ps1`, иначе `ps` |
+| `{{CENTRAL}}`, `{{PROJECTS_DIR}}`, `{{ROOT}}` | locations from step 2 |
+| `{{ROOT_RULES}}` | path to the rules file at the projects root |
+| `{{SEARCH}}` | the search command: `python <agent folder>/scripts/memory_search.py` |
+| `{{AUTOLOAD}}` | two or three sentences on what enters the context by itself: the session-start hook adds the shared memory index, Claude Code loads project memory on its own |
+| `{{HOOKCHECK}}` | a rule: at session start, find the line `memory-kit: хуки работают` ("memory-kit: hooks are working") in the context; if it is missing, tell the person the hooks did not fire |
+| `{{ZOMBIES}}` | how to look for abandoned background processes at the end of a session: `scripts/find-zombies.ps1` on Windows, `ps` elsewhere |
 
-У человека уже есть свои правила про память? Не клади второй раздел поверх. Сверь образец с его
-текстом, допиши только недостающее и покажи ему сравнение.
+The person already has their own memory rules? Do not lay a second section on top. Compare the sample
+with their text, add only what is missing and show them the comparison.
 
-У Codex есть потолок на размер правил: по умолчанию 32 768 байт на все файлы правил вместе,
-конец он молча не читает. Кириллица занимает два байта на знак. Не влезает? Сократи правила
-или подними `project_doc_max_bytes` в `~/.codex/config.toml`. Проверка это считает.
+Codex caps the size of rules: by default 32,768 bytes across all rules files together,
+and it silently skips the rest. Cyrillic takes two bytes per character. Does not fit? Shorten the rules
+or raise `project_doc_max_bytes` in `~/.codex/config.toml`. The check counts this.
 
-## Шаг 8. Разрешения
+## Step 8. Permissions
 
-Общая память лежит вне папки проекта, поэтому агент будет спрашивать разрешение на каждую запись.
-Покажи человеку, что вписать, и попроси сделать это самому:
+Shared memory lives outside the project folder, so the agent will ask for permission on every write.
+Show the person what to add and ask them to do it themselves:
 
-- Claude Code, `~/.claude/settings.json`: папку памяти в `permissions.additionalDirectories`;
-- Codex, `~/.codex/config.toml`: папку памяти в `writable_roots` раздела `[sandbox_workspace_write]`.
+- Claude Code, `~/.claude/settings.json`: the memory folder in `permissions.additionalDirectories`;
+- Codex, `~/.codex/config.toml`: the memory folder in `writable_roots` of the `[sandbox_workspace_write]` section.
 
-## Шаг 9. Проверка
-
-```bash
-python <папка агента>/scripts/kit_check.py --kit <папка набора>
-```
-
-Проверка смотрит настройки, наличие файлов и их совпадение с набором, прописанные хуки, ответ хука
-начала сессии, сборщик оглавления, поиск и потолок правил Codex. Последняя строка должна быть
-«Всё на месте.». Есть пункты «НЕТ»? Исправь и запусти снова. Перескажи человеку итог своими словами
-и не называй установку готовой, пока проверка не прошла.
-
-Потом собери оглавление и скажи человеку, что дальше:
+## Step 9. Check
 
 ```bash
-python <папка агента>/scripts/memory_index.py <central>
+python <agent folder>/scripts/kit_check.py --kit <kit folder>
 ```
 
-- открыть новую сессию в папке проекта и спросить «что у нас с проектом?»;
-- в Codex подтвердить хуки через `/hooks`;
-- в конце работы сказать «стоп».
+The check looks at the settings, whether the files exist and match the kit, the configured hooks, the
+session-start hook's reply, the index builder, search and the Codex rules cap. The last line must be
+"Всё на месте." ("All in place."). Any items marked "НЕТ" ("NO")? Fix them and run again. Retell the
+result to the person in your own words, and do not call the install done until the check passes.
 
-## Обновление
+The check prints its report in Russian; translate it for the person if needed.
 
-1. Обнови папку набора: `git pull`.
-2. Запусти проверку. Строки «совпадает с набором» с отметкой «НЕТ» покажут, какие файлы отстали
-   или были поправлены на месте.
-3. Поправленные на месте сначала разбери, как в шаге 3. Затем скопируй файлы набора заново.
-4. Сверь таблицу хуков из шага 6 с настройками: в новой версии могли появиться новые.
-5. Запусти проверку ещё раз.
+Then build the index and tell the person what comes next:
 
-## Удаление
+```bash
+python <agent folder>/scripts/memory_index.py <central>
+```
 
-Убери из настроек агента хуки из шага 6, удали `memory-kit.json` и раздел правил между метками.
-Файлы в `hooks/` и `scripts/` можно оставить: без настроек они ничего не делают. Папку памяти
-не трогай, это данные человека.
+- open a new session in the project folder and ask "what's the state of the project?";
+- in Codex, approve the hooks with `/hooks`;
+- at the end of the work, say "stop".
 
-## Что не проверено
+## Updating
 
-Набор собран и проверен на Windows, тесты проходят и на Linux. На macOS его никто из авторов
-не запускал. Споткнулись? Напишите в Issues, что сломалось.
+1. Update the kit folder: `git pull`.
+2. Run the check. Lines "совпадает с набором" ("matches the kit") marked "НЕТ" ("NO") show which files
+   are behind or were edited in place.
+3. Sort out files edited in place first, as in step 3. Then copy the kit's files again.
+4. Compare the hook table from step 6 with the settings: a new version may have added hooks.
+5. Run the check again.
+
+## Removing
+
+Remove the hooks from step 6 from the agent's settings, delete `memory-kit.json` and the rules section between the markers.
+The files in `hooks/` and `scripts/` can stay: without settings they do nothing. Do not touch the memory
+folder; it is the person's data.
+
+## Not tested
+
+The kit was built and tested on Windows; the tests also pass on Linux. None of the authors has run it
+on macOS. Hit a problem? Open an Issue and describe what broke.

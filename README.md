@@ -1,264 +1,264 @@
-# memory-kit — память между сессиями для Claude Code и Codex
+# memory-kit: memory across sessions for Claude Code and Codex
 
-Агент не помнит прошлые сессии. Каждый раз приходится объяснять заново, на чём остановились
-и как с вами работать. Этот набор даёт агенту память, которая ведёт себя сама: подгружается
-в начале сессии, напоминает правила в нужный момент, сохраняется в конце и не разрастается
-до нечитаемого файла.
+An agent does not remember past sessions. Every time you have to explain again where you left off
+and how you like to work. This kit gives the agent a memory that runs itself: it loads at the start
+of a session, brings up the right rules at the right moment, gets saved at the end, and does not grow
+into a file nobody can read.
 
-Набор вырос из рабочей системы, на которой больше полугода ведутся три десятка проектов.
-Схема с картинками: [claude-memory.forge-hub.ru](https://claude-memory.forge-hub.ru).
+The kit grew out of a working setup that has run about thirty projects for more than half a year.
+Illustrated overview (in Russian): [claude-memory.forge-hub.ru](https://claude-memory.forge-hub.ru).
 
-## Что вы получите
+## What you get
 
-**В начале сессии**
+**At the start of a session**
 
-- Агент уже знает, где вы остановились. Хук подкладывает ему записку проекта (`HANDOFF.md`),
-  последние записи журнала и оглавление правил.
-- Свежие изменения из удалённого репозитория подтягиваются сами, если это безопасно.
+- The agent already knows where you stopped. A hook hands it the project note (`HANDOFF.md`),
+  the latest journal entries and the index of rules.
+- Fresh changes from the remote repository are pulled automatically when it is safe to do so.
 
-**Во время работы**
+**While you work**
 
-- Правила приходят тогда, когда нужны. Перед коммитом, пушем и командой на сервер агент получает
-  до пяти правил по теме. Первый за сессию пуш и первая команда на сервер останавливаются один раз,
-  чтобы агент сверился до действия.
-- Подсказка по словам вашей просьбы. Просите поправить слайд, переделать экран или разобрать
-  переписку, и правила по этой теме приходят вместе с просьбой. Свои темы добавляются в настройках.
-- Программа зависла или не открывается. На слова «зависло», «не открывается», «падает» агент получает
-  записки именно про эту программу: известные грабли и обход, вместо отладки с нуля.
-- Сжатие длинного разговора не теряет решений. Перед сжатием набор сохраняет копию записки проекта,
-  после сжатия агент узнаёт, где она, и дописывает в записку то, что успели решить.
-- Опасные команды останавливаются. `git add -A`, `git add .` и `git commit -a` не проходят никогда:
-  агент получает отказ с объяснением и добавляет файлы поимённо.
-- Помощники (субагенты) стартуют не с пустой головой: получают команду поиска по памяти, главные
-  правила и начало записки проекта.
-- Поиск по всей памяти одной командой: правила, справочники, журналы и разговоры прошлых сессий.
+- Rules arrive when they are needed. Before a commit, a push or a command on a server, the agent gets
+  up to five rules on that topic. The first push and the first server command of a session are stopped
+  once, so the agent checks the rules before acting rather than after.
+- Hints from the words of your request. Ask to fix a slide, rework a screen or go through a chat
+  history, and the rules on that topic come along with the request. You can add your own topics in the settings.
+- A program hangs or will not open. On words like "frozen", "won't open", "crashes" the agent gets
+  the notes about that particular program: known pitfalls and the workaround, instead of debugging from scratch.
+- Compacting a long conversation does not lose decisions. Before compaction the kit saves a copy of the
+  project note; after compaction the agent learns where it is and adds what was decided in the meantime.
+- Dangerous commands are stopped. `git add -A`, `git add .` and `git commit -a` never go through:
+  the agent gets a refusal with an explanation and adds files by name.
+- Helpers (subagents) do not start with an empty head: they get the memory search command, the main
+  rules and the beginning of the project note.
+- One command searches all of memory: rules, references, journals and conversations from past sessions.
 
-**В конце сессии**
+**At the end of a session**
 
-- Одно слово «стоп», и агент обновляет записку, коммитит и пушит, проверяет зависшие процессы,
-  пишет запись в журнал, разбирает сессию и сохраняет новые правила.
-- Если после «стоп» агент не выдал текст для следующей сессии, ход не завершится, пока он его не допишет.
-- Если в репозитории текущего проекта остались правки без коммита или незапушенные ветки, ход
-  остановится один раз: агент коммитит своё поимённо и пушит, а про чужое и спорное пишет в отчёте.
-  В других репозиториях, которые сессия задела по пути, ход держат только её собственные
-  незапушенные коммиты; незакоммиченное там не трогается.
-  Новые неотслеживаемые файлы проверка не считает: решать про них человеку.
+- One word, «стоп» ("stop"), and the agent updates the note, commits and pushes, checks for stuck
+  processes, writes a journal entry, reviews the session and saves new rules.
+- If after "stop" the agent has not produced the text for the next session, the turn will not end
+  until it writes it.
+- If the current project's repository still has uncommitted changes or unpushed branches, the turn
+  stops once: the agent commits its own changes by name and pushes, and reports anything foreign or
+  disputable. In other repositories the session touched along the way, only its own unpushed commits
+  hold the turn; uncommitted changes there are left alone.
+  New untracked files are not counted: deciding about them is up to a human.
 
-**Постоянно**
+**All the time**
 
-- Правила копятся сами. Поправили агента или подтвердили удачный ход, и это становится файлом
-  правила с вашими словами и пометкой уверенности: сначала «проба», после повторения «правило».
-- Оглавление не переполняется. Его собирает скрипт по жёсткому бюджету. Что не влезло, уходит
-  в отдельный каталог, ничего не теряется.
-- Журналы не разрастаются. В журнале проекта остаются пять свежих записей, старые переезжают
-  в архив рядом. Поиск находит и их.
-- Битые ссылки видны сразу. Если строка оглавления ведёт на удалённый или переименованный файл,
-  агент один раз останавливается в конце хода и получает список.
-- Разговоры не пропадают. Claude Code стирает записи сессий через 30 дней. Набор сохраняет из них
-  текст человека и агента, без вывода инструментов и с вырезанными ключами.
-- Одна память на двух агентов. Claude Code и Codex читают и пишут одни и те же файлы и получают
-  одни и те же подсказки.
-- Журнал и отчёт. Видно, сколько раз агенту показали правила, сколько команд остановили
-  и как по неделям меняется доля ваших поправок.
+- Rules accumulate on their own. Correct the agent or confirm a good move, and it becomes a rule file
+  with your own words and a confidence mark: first `проба` ("trial"), after it repeats `правило` ("rule").
+- The index does not overflow. A script builds it within a hard budget. What does not fit goes into
+  a separate catalog; nothing is lost.
+- Journals do not bloat. A project journal keeps the five most recent entries; older ones move to an
+  archive next to it. Search finds those too.
+- Broken links show up at once. If an index line points to a deleted or renamed file, the agent stops
+  once at the end of the turn and gets the list.
+- Conversations do not disappear. Claude Code deletes session transcripts after 30 days. The kit keeps
+  the human and agent text from them, without tool output and with keys cut out.
+- One memory for two agents. Claude Code and Codex read and write the same files and get the same hints.
+- Log and report. You can see how many times the agent was shown rules, how many commands were stopped,
+  and how the share of your corrections changes week by week.
 
-## Что нужно
+## Requirements
 
-- Claude Code или Codex CLI (можно оба)
-- Python 3.8 или новее
-- Node.js 18 или новее
+- Claude Code or Codex CLI (or both)
+- Python 3.8 or newer
+- Node.js 18 or newer
 - git
-- Windows, macOS или Linux. Скрипт поиска зависших процессов работает только на Windows.
+- Windows, macOS or Linux. The script that looks for stuck processes works only on Windows.
 
-## Установка
+## Installation
 
-### Через агента
+### Through the agent
 
-Откройте Claude Code или Codex в корневой папке своих проектов и вставьте текст из
-[INSTALL-PROMPT.md](INSTALL-PROMPT.md). Агент скачает набор, покажет, что изменится,
-и поставит его после вашего «да».
+Open Claude Code or Codex in the root folder of your projects and paste the text from
+[INSTALL-PROMPT.md](INSTALL-PROMPT.md). The agent will download the kit, show what will change,
+and install it after you say "yes".
 
-У вас уже есть свои хуки, свои правила или своя папка памяти? Агент поставит набор рядом с ними
-по [INSTALL.md](INSTALL.md): он смотрит, что уже стоит, и дописывает только недостающее.
-Итог проверяет один скрипт:
+Already have your own hooks, rules or memory folder? The agent will install the kit alongside them
+following [INSTALL.md](INSTALL.md): it looks at what is already there and adds only what is missing.
+One script checks the result:
 
 ```bash
 python ~/.claude/scripts/kit_check.py
 ```
 
-Он сверяет установленные файлы с набором и показывает, что отстало или было поправлено на месте.
-Для Codex добавьте `--agent-dir ~/.codex`.
+It compares the installed files with the kit and shows what has fallen behind or was edited in place.
+For Codex add `--agent-dir ~/.codex`.
 
-### Вручную
+### By hand
 
 ```bash
 git clone https://github.com/GuruDevvv/claude-memory-kit
 cd claude-memory-kit
 
-# 1. посмотреть, что изменится (ничего не пишет)
+# 1. see what will change (writes nothing)
 python install.py --root ~/Projects --dry-run
 
-# 2. установить и завести записку в первом проекте
+# 2. install and create the note in the first project
 python install.py --root ~/Projects --project ~/Projects/MyApp
 
-# 3. проверить
+# 3. check
 python install.py --root ~/Projects --check
 ```
 
-`--root` — папка, внутри которой лежат ваши проекты. Установщик сам находит, какие агенты
-у вас стоят. Указать явно можно флагом `--tool claude`, `--tool codex` или `--tool both`.
+`--root` is the folder that holds your projects. The installer finds out by itself which agents
+you have. You can name them explicitly with `--tool claude`, `--tool codex` or `--tool both`.
 
-После установки откройте **новую** сессию в папке проекта и спросите «что у нас с проектом?».
-Агент должен ответить по записке, не задавая вопросов.
+After installing, open a **new** session in the project folder and ask "what's the state of the project?".
+The agent should answer from the note without asking questions.
 
 ### Codex
 
-Запустите консольный Codex и подтвердите новые хуки: он спросит об этом сам при старте,
-то же окно открывает команда `/hooks`. Пока хукам не доверили, Codex их пропускает.
-Если забыть, агент напомнит об этом в первом ответе каждой сессии.
+Start the Codex CLI and approve the new hooks: it asks about them on its own at startup,
+and the `/hooks` command opens the same window. Until the hooks are trusted, Codex skips them.
+If you forget, the agent will remind you in the first reply of every session.
 
-## Как этим пользоваться
+## How to use it
 
-| Момент | Что делаете вы | Что происходит |
+| Moment | What you do | What happens |
 |---|---|---|
-| Начало сессии | ничего | агент уже знает состояние проекта и ваши правила |
-| Агент ошибся или угадал | говорите «не так» или «да, именно» | появляется файл правила с вашими словами |
-| Агент собрался коммитить или идти на сервер | ничего | он получает правила по теме до действия |
-| Важное решение посреди работы | «обнови HANDOFF» | записка обновляется сразу |
-| Нужно вспомнить, что решили месяц назад | «найди в памяти…» | агент ищет по правилам, журналам и разговорам |
-| Конец сессии | «стоп» | шесть шагов завершения, в конце готовый текст для следующей сессии |
-| Новый проект | `python install.py --root … --project <папка>` | в проекте появляется `HANDOFF.md` |
+| Start of a session | nothing | the agent already knows the project state and your rules |
+| The agent got it wrong or right | say "not like that" or "yes, exactly" | a rule file appears with your words |
+| The agent is about to commit or go to a server | nothing | it gets the rules on that topic before acting |
+| An important decision mid-work | "update HANDOFF" | the note is updated right away |
+| You need to recall what was decided a month ago | "search memory for…" | the agent searches rules, journals and conversations |
+| End of a session | «стоп» ("stop") | six wrap-up steps, ending with ready text for the next session |
+| A new project | `python install.py --root … --project <folder>` | `HANDOFF.md` appears in the project |
 
-## Поиск по памяти
+## Searching memory
 
-В оглавление влезает примерно треть правил. Остальное находит поиск:
+About a third of the rules fit into the index. Search finds the rest:
 
 ```bash
-python ~/.claude/scripts/memory_search.py "как выкатывать на сервер"
-python ~/.claude/scripts/memory_search.py "что решили про скидку" --sessions
+python ~/.claude/scripts/memory_search.py "how to deploy to the server"
+python ~/.claude/scripts/memory_search.py "what we decided about the discount" --sessions
 ```
 
-Первая команда ищет по правилам, справочникам и журналам, вторая по разговорам прошлых сессий.
-Агент знает эти команды из раздела правил и запускает их сам.
+The first command searches rules, references and journals; the second searches conversations from
+past sessions. The agent knows these commands from the rules section and runs them itself.
 
-## Журнал и отчёт
+## Log and report
 
-Срабатывания подсказок и остановок пишутся в `.metrics/events.jsonl` внутри общей памяти.
-Текста команд в журнале нет, только тема и имена показанных правил. Отчёт за восемь недель:
+Hints and stops are logged to `.metrics/events.jsonl` inside the shared memory.
+The log holds no command text, only the topic and the names of the rules shown. Report for eight weeks:
 
 ```bash
 python ~/.claude/scripts/memory_report.py --weeks 8
 ```
 
-Ключ `--write` сохраняет отчёт в `reviews/metrics.md`. Ключ `--label` размечает ваши реплики
-моделью Haiku («поправка агенту» или нет) и считает долю поправок по неделям. Разметка тратит
-лимит Claude Code, поэтому по умолчанию выключена.
+The `--write` flag saves the report to `reviews/metrics.md`. The `--label` flag has the Haiku model
+tag your messages ("a correction to the agent" or not) and counts the share of corrections per week.
+Tagging spends your Claude Code quota, so it is off by default.
 
-## Где что лежит
+## Where things live
 
 ```
-~/.agent-memory/central/            общая память, одна на все проекты
-├── MEMORY.md                       оглавление — собирает скрипт
-├── MEMORY.head.md                  шапка оглавления — пишете вы
-├── INDEX.md                        что не влезло в оглавление
-├── PROJECT_INDEX.md                список проектов — собирает скрипт
-├── feedback/                       правила работы, один файл на правило
-├── ref/                            справочники
-├── projects/<Проект>.md            журналы сессий, новая запись сверху, пять свежих
-├── projects/archive/               старые записи журналов, поиск их видит
-├── plans/ research/ reviews/       планы, разведка, разборы
-└── .metrics/                       журнал срабатываний
+~/.agent-memory/central/            shared memory, one for all projects
+├── MEMORY.md                       index, built by a script
+├── MEMORY.head.md                  index header, written by you
+├── INDEX.md                        what did not fit into the index
+├── PROJECT_INDEX.md                list of projects, built by a script
+├── feedback/                       working rules, one file per rule
+├── ref/                            references
+├── projects/<Project>.md           session journals, newest entry on top, five most recent
+├── projects/archive/               older journal entries, search sees them
+├── plans/ research/ reviews/       plans, research, reviews
+└── .metrics/                       log of hints and stops
 
-~/.agent-memory/sessions/           архив разговоров; в git не класть
+~/.agent-memory/sessions/           conversation archive; do not put it in git
 
-~/.claude/projects/<имя>/memory/    память отдельного проекта (встроенная память Claude Code)
+~/.claude/projects/<name>/memory/   memory of a single project (Claude Code's built-in memory)
 
-<корень проектов>/CLAUDE.md, AGENTS.md    шаблон записки HANDOFF
-<проект>/HANDOFF.md                        «где мы сейчас», до 25 строк
+<projects root>/CLAUDE.md, AGENTS.md     HANDOFF note template
+<project>/HANDOFF.md                     "where we are now", up to 25 lines
 
-~/.claude/ и ~/.codex/
-├── hooks/                          5 файлов хуков
-├── scripts/                        сборщики, поиск, архив, отчёт, уход за памятью, проверка установки
-├── handoff-snapshots/              копии записок перед сжатием разговора (Claude Code)
-├── memory-kit.json                 настройки набора
-└── CLAUDE.md или AGENTS.md         раздел правил между метками memory-kit
+~/.claude/ and ~/.codex/
+├── hooks/                          5 hook files
+├── scripts/                        builders, search, archive, report, memory upkeep, install check
+├── handoff-snapshots/              copies of notes before a conversation is compacted (Claude Code)
+├── memory-kit.json                 kit settings
+└── CLAUDE.md or AGENTS.md          rules section between the memory-kit markers
 ```
 
-Общая память нарочно лежит вне папки `.claude`. Claude Code считает файлы внутри `.claude`
-чувствительными и на каждую запись туда из папки проекта требует подтверждения.
+The shared memory deliberately lives outside the `.claude` folder. Claude Code treats files inside
+`.claude` as sensitive and asks for confirmation on every write there from a project folder.
 
-Подробное устройство и причины решений описаны в [docs/GUIDE.md](docs/GUIDE.md).
+The detailed design and the reasons behind it are in [docs/GUIDE.md](docs/GUIDE.md).
 
-## Что установщик меняет на вашей машине
+## What the installer changes on your machine
 
-- создаёт `~/.agent-memory/`;
-- копирует 5 хуков и 8 скриптов в папку агента;
-- добавляет свои хуки в `settings.json` (Claude Code) или `hooks.json` (Codex), чужие не трогает;
-- Claude Code: добавляет папку памяти в разрешённые для чтения и записи;
-- Codex: добавляет папку памяти в `writable_roots` файла `config.toml`, если такого раздела ещё нет;
-- дописывает раздел правил в `CLAUDE.md` и `AGENTS.md` строго между метками
-  `<!-- memory-kit:start -->` и `<!-- memory-kit:end -->`.
+- creates `~/.agent-memory/`;
+- copies 5 hooks and 8 scripts into the agent's folder;
+- adds its hooks to `settings.json` (Claude Code) or `hooks.json` (Codex), leaving other hooks alone;
+- Claude Code: adds the memory folder to the allowed read and write paths;
+- Codex: adds the memory folder to `writable_roots` in `config.toml` if that section is not there yet;
+- writes the rules section into `CLAUDE.md` and `AGENTS.md` strictly between the markers
+  `<!-- memory-kit:start -->` and `<!-- memory-kit:end -->`.
 
-Перед правкой любого существующего файла рядом сохраняется его копия с окончанием `.bak-дата`.
-Повторный запуск ничего не дублирует и ваши настройки не затирает.
+Before editing any existing file, a copy is saved next to it with a `.bak-<date>` suffix.
+Running it again duplicates nothing and does not overwrite your settings.
 
-## Обновление и удаление
+## Updating and removing
 
-Набор обновился? Хук начала сессии сам сверяет установленные файлы с папкой набора и говорит
-агенту о расхождении. Агент предложит обновить, порядок описан в [INSTALL.md](INSTALL.md).
+Has the kit been updated? The session start hook compares the installed files with the kit folder
+and tells the agent about any difference. The agent will offer to update; the procedure is in [INSTALL.md](INSTALL.md).
 
 ```bash
 python install.py --root ~/Projects --uninstall
 ```
 
-Удаление снимает хуки и раздел правил. Память и записки проектов остаются на месте.
+Uninstalling removes the hooks and the rules section. Memory and project notes stay where they are.
 
-## Настройки
+## Settings
 
-Файл `memory-kit.json` в папке агента. Главные ключи:
+The `memory-kit.json` file in the agent's folder. Main keys:
 
-| Ключ | По умолчанию | Что делает |
+| Key | Default | What it does |
 |---|---|---|
-| `sync_on_start` | `true` | подтягивать изменения из удалённого репозитория в начале сессии |
-| `journal_entries` | `3` | сколько записей журнала подкладывать |
-| `journal_keep` | `5` | сколько записей оставлять в журнале; старые уходят в `projects/archive/`, поиск их видит; `0` — не обрезать |
-| `inject_index` | `true` | подкладывать оглавление общей памяти |
-| `inject_project_index` | Codex: `true`, Claude Code: `false` | подкладывать оглавление памяти проекта |
-| `start_max_chars` | Codex: `5800` | потолок текста на старте; Codex больше к модели не пропускает |
-| `recall_block` | `true` | останавливать первый пуш и первую команду на сервер |
-| `recall` | темы набора | свои темы подсказок: признак команды или слова просьбы |
-| `guard` | `true` | остановки; `false` выключает все, `{"git_add_all": false}` одну |
-| `guards` | нет | свои остановки |
-| `stop_words` | стоп, всё, завершай, пока, stop | слова, которыми вы заканчиваете сессию |
-| `metrics` | `true` | вести журнал срабатываний |
-| `label` | `false` | раз в сутки размечать реплики моделью и обновлять отчёт |
+| `sync_on_start` | `true` | pull changes from the remote repository at the start of a session |
+| `journal_entries` | `3` | how many journal entries to hand to the agent |
+| `journal_keep` | `5` | how many entries to keep in a journal; older ones go to `projects/archive/`, search sees them; `0` means no trimming |
+| `inject_index` | `true` | hand the shared memory index to the agent |
+| `inject_project_index` | Codex: `true`, Claude Code: `false` | hand the project memory index to the agent |
+| `start_max_chars` | Codex: `5800` | cap on the start-up text; Codex passes no more than this to the model |
+| `recall_block` | `true` | stop the first push and the first server command |
+| `recall` | kit topics | your own hint topics: a command pattern or words in the request |
+| `guard` | `true` | stops; `false` turns them all off, `{"git_add_all": false}` turns off one |
+| `guards` | none | your own stops |
+| `stop_words` | стоп, всё, завершай, пока, stop | words you end a session with |
+| `metrics` | `true` | keep the log of hints and stops |
+| `label` | `false` | once a day tag messages with a model and refresh the report |
 
-Полный список с пояснениями: [INSTALL.md](INSTALL.md), шаг 4.
+Full list with explanations: [INSTALL.md](INSTALL.md), step 4.
 
-## Что проверено и что нет
+## What has been tested and what has not
 
-Проверено на Windows 11 и в контейнере Linux: тесты набора (хуки, остановки, сборка оглавления,
-поиск, архив разговоров), установка, повторная установка, удаление.
+Tested on Windows 11 and in a Linux container: the kit's tests (hooks, stops, index building,
+search, conversation archive), installation, reinstallation, removal.
 
-Claude Code 2.1 прошёл полный круг: ответил по записке в новой сессии, на «стоп» выполнил
-все шаги, а следующая сессия знала правило, сохранённое в предыдущей.
+Claude Code 2.1 went through the full cycle: it answered from the note in a new session, ran all
+the steps on "stop", and the next session knew the rule saved in the previous one.
 
-Codex 0.160 проверен живыми запусками на Windows: правила читаются до конца, подсказка перед
-коммитом и по словам просьбы приходит, `git add -A` останавливается, разговоры попадают в архив.
-Две особенности Codex:
+Codex 0.160 was tested with live runs on Windows: rules are read to the end, the hint before a commit
+and the hint from request words arrive, `git add -A` is stopped, conversations reach the archive.
+Two Codex specifics:
 
-- к модели он пропускает около шести тысяч знаков от хука, поэтому на старте получает записку,
-  главные правила и адрес оглавления, а само оглавление читает сам;
-- в его песочнице папка `.git` закрыта на запись, поэтому на коммит он спрашивает разрешение.
+- it passes only about six thousand characters from a hook to the model, so at start-up it gets the
+  note, the main rules and the address of the index, and reads the index itself;
+- in its sandbox the `.git` folder is read-only, so it asks permission to commit.
 
-Полный круг «стоп» на Codex не прогонялся. На macOS набор не запускался.
+The full "stop" cycle has not been run on Codex. The kit has not been run on macOS.
 
-Чего ждать от памяти. Мы прогнали 16 ситуаций, где агент раньше ошибался, с памятью и без.
-В 12 из них свежий агент справился и без памяти. Устойчиво память помогла в одной. Правило,
-лежащее в файле, само не работает: его надо подать в нужный момент. Поэтому в наборе есть
-подсказки и остановки, а главным замером остаётся доля ваших поправок по неделям.
+What to expect from memory. We ran 16 situations where the agent used to make mistakes, with memory
+and without. In 12 of them a fresh agent managed without memory. Memory helped consistently in one.
+A rule sitting in a file does nothing by itself: it has to be delivered at the right moment. That is
+why the kit has hints and stops, and the main measure remains the weekly share of your corrections.
 
-Если что-то сломалось, напишите в Issues.
+If something breaks, open an Issue.
 
-## Лицензия
+## License
 
 MIT

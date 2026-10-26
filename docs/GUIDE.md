@@ -1,333 +1,344 @@
-# Как устроена память агента
+# How the agent's memory works
 
-Документ для двух читателей: для человека, который хочет понять систему, и для агента,
-которому поручили её поставить или починить. Установка описана в [README](../README.md),
-здесь объяснено устройство и причины решений.
+This document has two readers: a person who wants to understand the system, and an agent asked
+to install or fix it. Installation is covered in the [README](../README.md); this page explains
+how the system is built and why.
 
-Версия 2, октябрь 2026. Первая версия (апрель 2026) описывала четыре слоя и ручное
-оглавление. Что изменилось с тех пор, собрано в конце.
+Version 2, October 2026. The first version (April 2026) described four layers and a hand-kept
+index. What has changed since then is listed at the end.
 
-## Зачем это всё
+A note on language: the kit was built for a Russian-speaking user, so some section names, field
+values and trigger words it actually matches are Russian. Where this guide mentions one, it keeps
+the literal value and gives the English meaning once in parentheses.
 
-У агента нет памяти между сессиями. Обычное решение — один файл правил на всё. При десяти
-проектах он распухает: агент либо читает его целиком и тратит контекст, либо не читает.
-Между сессиями одного проекта теряется нить, каждая начинается с вопроса «где мы остановились».
+## Why any of this
 
-Решение из четырёх частей:
+An agent has no memory between sessions. The usual fix is one rules file for everything. With ten
+projects it swells: the agent either reads all of it and burns context, or does not read it.
+Between sessions of the same project the thread is lost, and every session starts with "where
+did we leave off".
 
-1. **Правила поведения** лежат в файле правил агента и грузятся всегда.
-2. **Знания** лежат файлами в папках памяти и грузятся по оглавлению.
-3. **Автоматика** на хуках делает то, о чём иначе надо помнить.
-4. **Порядок конца сессии** превращает прошедшую работу в записку, журнал и правила.
+The fix has four parts:
 
-## Часть 1. Правила поведения
+1. **Behaviour rules** live in the agent's rules file and are always loaded.
+2. **Knowledge** lives as files in memory folders and is loaded through an index.
+3. **Automation** on hooks does what someone would otherwise have to remember.
+4. **The end-of-session routine** turns the work done into a handoff note, a log and rules.
 
-| Файл | Когда грузится | Что в нём |
+## Part 1. Behaviour rules
+
+| File | When it loads | What it holds |
 |---|---|---|
-| `~/.claude/CLAUDE.md` или `~/.codex/AGENTS.md` | в каждой сессии | как говорить с человеком, порядок начала и конца сессии, как писать правила |
-| `<корень проектов>/CLAUDE.md` или `AGENTS.md` | в сессиях внутри корня | шаблон записки HANDOFF, что беречь при сжатии контекста |
-| `<проект>/CLAUDE.md` или `AGENTS.md` | в сессиях этого проекта | особенности проекта |
+| `~/.claude/CLAUDE.md` or `~/.codex/AGENTS.md` | every session | how to talk to the person, how to start and end a session, how to write rules |
+| `<projects root>/CLAUDE.md` or `AGENTS.md` | sessions inside the root | the HANDOFF note template, what to keep when context is compacted |
+| `<project>/CLAUDE.md` or `AGENTS.md` | sessions of that project | project specifics |
 
-Сюда идёт только то, что должно исполняться всегда. Это приказ, а память — справка. Если одну
-и ту же просьбу приходится повторять, правило лежит не там: его место в файле правил.
+Only what must always be followed goes here. This is an order; memory is a reference. If the
+same request has to be repeated, the rule is in the wrong place: it belongs in the rules file.
 
-Набор дописывает в эти файлы один раздел между метками `<!-- memory-kit:start -->`
-и `<!-- memory-kit:end -->`. Всё вне меток остаётся вашим.
+The kit adds one section to these files between the markers `<!-- memory-kit:start -->`
+and `<!-- memory-kit:end -->`. Everything outside the markers stays yours.
 
-## Часть 2. Знания
+## Part 2. Knowledge
 
-### Два уровня
+### Two levels
 
-- **Общая память** — `~/.agent-memory/central/`. То, что пригодится в двух и более проектах:
-  правила работы, справочники, журналы всех проектов, список проектов.
-- **Память проекта** — `~/.claude/projects/<имя>/memory/`. То, что касается одного проекта:
-  особенности выкладки, сведения о заказчике, соглашения по коду. У Claude Code это встроенная
-  память, он сам подгружает её оглавление. Codex пользуется теми же папками.
+- **Shared memory**: `~/.agent-memory/central/`. Whatever is useful in two or more projects:
+  working rules, references, the logs of all projects, the project list.
+- **Project memory**: `~/.claude/projects/<name>/memory/`. Whatever concerns one project:
+  deployment specifics, client details, code conventions. In Claude Code this is the built-in
+  memory, and it loads its index by itself. Codex uses the same folders.
 
-Имя папки проекта получается из полного пути заменой всего, кроме латинских букв и цифр,
-на дефис: `E:\Work\Shop` даёт `E--Work-Shop`, `/Users/ann/Work/Shop` даёт `-Users-ann-Work-Shop`.
+The project folder name comes from the full path with everything except Latin letters and digits
+replaced by a hyphen: `E:\Work\Shop` gives `E--Work-Shop`, `/Users/ann/Work/Shop` gives `-Users-ann-Work-Shop`.
 
-Граница проводится одним вопросом: «пригодится в двух и более проектах?» Одно правило живёт
-в одном месте. Если правило проекта понадобилось во втором проекте, оно переезжает в общую память.
+The line is drawn with one question: "will this be useful in two or more projects?" A rule lives
+in one place. If a project rule is needed in a second project, it moves to shared memory.
 
-**Почему общая память лежит вне `.claude`.** Claude Code считает файлы внутри любой папки
-`.claude` чувствительными. Запись в память *своего* проекта он разрешает, а запись в общую
-память из папки другого проекта требует подтверждения каждый раз, и правила разрешений этого
-не отменяют. Проверено прогоном: в `.claude` запись журнала на «стоп» срывалась, после переноса
-в `~/.agent-memory` прошла без единого вопроса.
+**Why shared memory lives outside `.claude`.** Claude Code treats files inside any `.claude`
+folder as sensitive. It allows writing to the memory of *its own* project, but writing to shared
+memory from another project's folder asks for confirmation every time, and permission rules do
+not override that. Checked with a test run: inside `.claude`, writing the log on "stop" kept
+failing; after moving to `~/.agent-memory` it went through without a single prompt.
 
-### Что лежит в общей памяти
+### What is in shared memory
 
-| Папка или файл | Что это |
+| Folder or file | What it is |
 |---|---|
-| `feedback/` | правила работы: «делай так», «не делай так». Один файл на правило |
-| `ref/` | справочники: серверы, инструменты, доступы. Открываются по теме задачи |
-| `projects/<Проект>.md` | журнал сессий проекта, новая запись сверху |
-| `plans/`, `research/`, `reviews/` | планы, разведка, разборы |
-| `MEMORY.md` | оглавление правил. Собирает скрипт |
-| `MEMORY.head.md` | шапка оглавления: кто владелец, порядок разделов. Пишется руками |
-| `INDEX.md` | правила, которым не хватило места в оглавлении |
-| `PROJECT_INDEX.md` | список проектов. Собирает скрипт |
+| `feedback/` | working rules: "do this", "don't do that". One file per rule |
+| `ref/` | references: servers, tools, access. Opened by task topic |
+| `projects/<Project>.md` | session log of a project, newest entry on top |
+| `plans/`, `research/`, `reviews/` | plans, research, post-mortems |
+| `MEMORY.md` | the index of rules. Built by a script |
+| `MEMORY.head.md` | the index header: who the owner is, section order. Written by hand |
+| `INDEX.md` | rules that did not fit into the index |
+| `PROJECT_INDEX.md` | the project list. Built by a script |
 
-### Файл правила
+### A rule file
 
 ```
 ---
 name: feedback_time_only_utc
-description: Время всегда хранить в UTC, в пояс клиента переводить только при показе
+description: Always store time in UTC; convert to the client's time zone only for display
 metadata:
   type: feedback
   status: проба
   seen: 1
-  index_line: "[Время — только UTC](feedback/feedback_time_only_utc.md) — хранить в UTC, в пояс клиента переводить только при показе"
-  moment: Перед тем как взяться
+  index_line: "[Time is UTC only](feedback/feedback_time_only_utc.md) — store in UTC, convert to the client's time zone only for display"
+  moment: Before starting
   origin_date: 2026-10-12
   origin_project: Shop
   origin_kind: owner
-  origin_quote: "больше никогда не храним местное время"
+  origin_quote: "we never store local time again"
 ---
 
-Само правило.
+The rule itself.
 
-**Почему:** напоминание уходило на три часа раньше.
-**Как применять:** любое поле времени в базе — в UTC.
+**Why:** the reminder went out three hours early.
+**How to apply:** every time field in the database is in UTC.
 ```
 
-Три решения, которые стоят за этой шапкой:
+Three decisions sit behind this header:
 
-**Строка оглавления несёт правило целиком.** Замер на 383 сессиях показал: файлы правил
-открывались 51 раз за всю историю. До файла дело почти не доходит, поэтому строка-указатель
-без содержания не работает. Файл нужен для истории «почему», а действует строка.
+**The index line carries the whole rule.** A count over 383 sessions showed that rule files were
+opened 51 times in total. The agent almost never gets as far as the file, so a pointer line with
+no content does not work. The file is there for the "why"; the line is what acts.
 
-**Раздел называется по моменту работы, а не по теме.** «Перед тем как взяться», «Когда получил
-результат», «Когда коммичу». Правило ищут в момент действия, а не по рубрике.
+**Sections are named by moment of work, not by topic.** "Before starting", "When I get a result",
+"When I commit". A rule is looked up at the moment of action, not by category.
 
-**Проба и правило.** Новое наблюдение записывается как `status: проба`, `seen: 1` и применяется
-мягко. Повторилось или человек подтвердил — становится `status: правило`. Проба, которая
-не подтвердилась за два месяца, удаляется. Так одна случайная сессия не рождает закон.
+**Trial and rule.** A new observation is written as `status: проба` (trial), `seen: 1` and applied
+gently. If it repeats or the person confirms it, it becomes `status: правило` (rule). A trial
+that is not confirmed within two months is deleted. This way one random session does not create a law.
 
-Поля `origin_*` отвечают на вопрос «откуда это взялось»: сказал человек (`owner`), предложил
-агент и человек согласился (`owner_ok`), вывод агента (`mine`) или вывод из поломки (`incident`).
-Без них через полгода требование владельца не отличить от догадки агента.
+The `origin_*` fields answer "where did this come from": the person said it (`owner`), the agent
+proposed it and the person agreed (`owner_ok`), the agent's own conclusion (`mine`), or a
+conclusion from a breakage (`incident`). Without them, half a year later you cannot tell the
+owner's requirement from the agent's guess.
 
-### Оглавление собирает скрипт
+### The index is built by a script
 
-Claude Code читает из `MEMORY.md` только первые 200 строк или 25 тысяч знаков, остальное
-молча отбрасывает. Оглавление, которое ведут руками, переполняется примерно раз в месяц,
-и правила из хвоста перестают действовать незаметно.
+Claude Code reads only the first 200 lines or 25 thousand characters of `MEMORY.md` and silently
+drops the rest. A hand-kept index overflows about once a month, and rules at the tail quietly
+stop working.
 
-Поэтому оглавление общей памяти собирает `memory_index.py`:
+So the shared-memory index is built by `memory_index.py`:
 
-- берёт шапку из `MEMORY.head.md`;
-- берёт строку каждого правила из его `index_line`;
-- ставит первыми закреплённые правила и раздел «Всегда»;
-- дальше набирает по очереди проверенные правила (`status: правило` и `seen` от 2) и новые
-  (файл правили за последние две недели). Очередь нужна, чтобы новое не вытесняло проверенное
-  и наоборот: на живой памяти в 440 файлов при одной общей шкале в оглавлении оказалось
-  2 проверенных правила из 52, а при простой надбавке проверенным — ни одной свежей пробы;
-- набирает строки, пока они влезают в 23,5 тысячи знаков и 180 строк;
-- остальное кладёт в `INDEX.md`;
-- сверяет счёт: каждый файл правила обязан оказаться в одном из двух списков. Потеря файла —
-  ошибка, о которой агент узнаёт в тот же ход.
+- it takes the header from `MEMORY.head.md`;
+- it takes each rule's line from its `index_line`;
+- it puts pinned rules and the «Всегда» ("Always") section first;
+- then it takes, in turn, proven rules (`status: правило` with `seen` of 2 or more) and new ones
+  (the file was edited in the last two weeks). The alternation keeps new rules from pushing out
+  proven ones and vice versa: on a live memory of 440 files, a single shared ranking put
+  2 proven rules out of 52 into the index, and a simple bonus for proven rules let in no fresh trials at all;
+- it adds lines while they fit into 23.5 thousand characters and 180 lines;
+- it puts the rest into `INDEX.md`;
+- it checks the count: every rule file must end up in one of the two lists. A lost file is an
+  error the agent learns about in the same turn.
 
-Если агент по привычке дописал строку в `MEMORY.md` руками, она не пропадает: скрипт переносит
-её в `index_line` файла, на который она ссылается.
+If the agent, out of habit, adds a line to `MEMORY.md` by hand, it is not lost: the script moves
+it into the `index_line` of the file it links to.
 
-Скрипт собирает только те папки, где лежит `MEMORY.head.md`. Память проекта по умолчанию
-ведёт сам агент. Чтобы включить сборку и там, положите в неё свою шапку.
+The script only builds folders that contain `MEMORY.head.md`. Project memory is kept by the agent
+itself by default. To turn on building there too, put a header of your own into it.
 
 
-## Поиск по всей памяти
+## Searching all of memory
 
-В оглавление помещается около трети правил. Остальные лежат в `INDEX.md`, и агент туда почти
-не заглядывает. Поэтому в наборе есть поиск:
+About a third of the rules fit into the index. The rest sit in `INDEX.md`, and the agent hardly
+ever looks there. That is why the kit has a search:
 
 ```
-python scripts/memory_search.py "выкатить сайт на сервер"
+python scripts/memory_search.py "deploy the site to the server"
 ```
 
-Он отдаёт пять коротких строк со ссылкой на файл: правила, справочники и отдельные записи журналов.
-Ищет по общей памяти и по памяти проекта текущей папки, с ключом `--all` — по всем проектам.
+It returns five short lines with a link to the file: rules, references and individual log entries.
+It searches shared memory and the memory of the current folder's project; with `--all`, all projects.
 
-Внутри встроенный в Python SQLite с полнотекстовым поиском. Сервера, ключей и своего хранилища нет:
-индекс собирается в памяти при каждом запуске, на 440 файлах и 4 МБ журналов это меньше секунды.
-Русские окончания поиск обходит грубо: обрезает слово до основы и ищет по началу слова.
-Синонимов он не знает, «выкатить» и «деплой» для него разные слова.
+Inside is the SQLite with full-text search that ships with Python. There is no server, no keys and
+no storage of its own: the index is built in memory on every run, which takes under a second on
+440 files and 4 MB of logs. Russian word endings are handled crudely: the word is cut to its stem
+and matched by prefix. It knows no synonyms: "roll out" and "deploy" are different words to it.
 
-Проверка на 16 рабочих ситуациях, в которых агент уже ошибался не меньше двух раз: нужное правило
-оказалось в первых пяти строках поиска в 14 случаях. В оглавлении из этих правил были три.
-Ситуации подбирались среди правил вне оглавления, поэтому вторая цифра занижена нарочно:
-она показывает, что именно поиск возвращает, а не как плохо оглавление. Веса выдачи подбирались
-на этих же ситуациях, так что на новых результат будет скромнее.
+A check on 16 working situations in which the agent had already gone wrong at least twice: the
+right rule was in the first five search lines in 14 cases. The index held three of those rules.
+The situations were chosen among rules outside the index, so the second number is low on purpose:
+it shows what the search brings back, not how bad the index is. The result weights were tuned on
+these same situations, so on new ones the result will be more modest.
 
-Запускать поиск агента просит раздел правил: перед знакомым по типу делом, перед словом «нашёл»
-и перед записью нового правила.
-
-
-## Память в нужный момент
-
-Правило, прочитанное в начале сессии среди 180 строк оглавления, к моменту коммита уже не помнится.
-Хук `memory-recall-hook.py` подкладывает правила тогда, когда они нужны. Работает в Claude Code и в Codex.
-
-**Перед действием.** Агент собрался коммитить, пушить или идти на сервер и получает до пяти строк
-правил по теме. Правила берутся из всей памяти, а не только из оглавления: по названию раздела
-(«Когда коммичу», «Когда деплою») и поиском по словам темы и самой команды. На одну тему подсказка
-приходит раз за сессию.
-
-Добавка в контекст доходит до агента вместе с результатом команды, то есть уже после неё.
-Для коммита это терпимо. Пуш и команды на сервер назад не вернуть, поэтому первая такая команда
-за сессию останавливается: правила приходят причиной отказа, агент сверяется и повторяет команду,
-второй раз она проходит. Выключить остановку: `"recall_block": false` в `memory-kit.json`.
-Свои темы задаются там же ключом `recall` по образцу списка `GROUPS` в хуке.
-
-**Вместе с просьбой.** У части дел своей команды нет: поправить слайд, переделать экран, разобрать
-переписку. Здесь хук смотрит на слова просьбы человека и подкладывает те же до пяти строк правил
-вместе с ней. Ничего не останавливает, на одну тему приходит раз за сессию. Свои темы задаются
-тем же ключом `recall`, признак просьбы пишется в поле `prompt`.
-
-**Помощникам.** Помощник (субагент) стартует без записки проекта и без памяти, поэтому выдаёт
-давно известное за находку. На старте он получает до трёх тысяч знаков: команду поиска по памяти,
-раздел «Всегда» из оглавления и начало записки `HANDOFF.md`.
-
-Оба пути проверены живым запуском Claude Code 2.1.296: модель видит и подсказку, и отказ с правилами,
-помощник дословно называет команду поиска.
+The rules section asks the agent to run the search before a familiar kind of task, before saying
+"I found", and before writing a new rule.
 
 
-## Архив разговоров
+## Memory at the right moment
 
-Claude Code хранит записи сессий 30 дней и стирает. Вместе с ними пропадает то, что не попало
-ни в журнал, ни в правило: почему решили так, что именно сказал человек.
+A rule read at the start of a session among 180 index lines is forgotten by the time of the commit.
+The `memory-recall-hook.py` hook brings rules in when they are needed. It works in Claude Code and in Codex.
 
-`session_archive.py` забирает из записи сессии только разговор: что набрал человек и что агент
-ответил словами. Вызовы инструментов, их вывод, размышления модели и помощники не берутся.
-Разговор занимает меньше процента записи: на живой установке 349 сессий весом 2 ГБ дали архив в 8 МБ.
+**Before an action.** The agent is about to commit, push or go to a server, and it gets up to five
+lines of rules on the topic. Rules come from all of memory, not just the index: by section name
+(«Когда коммичу», «Когда деплою»: "When I commit", "When I deploy") and by searching the words of
+the topic and of the command itself. A hint on a given topic comes once per session.
 
-Сессия попадает в архив, когда её запись не менялась полчаса. Хук конца хода забирает по пять
-сессий за раз, первый проход по всем сразу: `python scripts/session_archive.py`.
-Архив лежит в `~/.agent-memory/sessions`, по папке на проект, по файлу на сессию.
+The added context reaches the agent together with the command's result, that is, after it.
+For a commit that is acceptable. A push or a server command cannot be taken back, so the first
+such command in a session is stopped: the rules arrive as the reason for the refusal, the agent
+checks them and repeats the command, and the second time it goes through. To turn the stop off:
+`"recall_block": false` in `memory-kit.json`. Your own topics are set there with the `recall` key,
+following the `GROUPS` list in the hook.
 
-Искать: `python scripts/memory_search.py "что решили про скидку" --sessions`. Находка — реплика
-человека вместе с ответом агента, с проектом и временем.
+**Along with the request.** Some tasks have no command of their own: fix a slide, redo a screen,
+go through a chat. Here the hook looks at the words of the person's request and adds the same up to
+five rule lines along with it. Nothing is stopped; a topic comes once per session. Your own topics
+are set with the same `recall` key; the request trigger goes in the `prompt` field.
 
-Ключи, токены и «пароль: …» вырезаются по маскам. Маска не гарантия: архив держите на своей машине
-и не кладите в git. Из записей Codex в архив идут только разговоры с человеком; запуски `codex exec`
-и помощников архив пропускает.
+**For helpers.** A helper (subagent) starts without the project note and without memory, so it
+presents long-known things as discoveries. At start it gets up to three thousand characters: the
+memory search command, the «Всегда» ("Always") section of the index and the beginning of the
+`HANDOFF.md` note.
 
-## Часть 3. Автоматика
+Both paths were checked with a live run of Claude Code 2.1.296: the model sees both the hint and
+the refusal with rules, and the helper names the search command word for word.
 
-Пять файлов хуков; подсказки `memory-recall-hook.py` описаны в разделе «Память в нужный момент». Все читают настройки из `memory-kit.json` рядом с папкой `hooks`. Нет файла
-настроек — молчат. Ошибка внутри хука никогда не мешает сессии.
 
-| Событие | Файл | Что делает |
+## Conversation archive
+
+Claude Code keeps session records for 30 days and then deletes them. With them goes whatever did
+not make it into the log or a rule: why something was decided, what exactly the person said.
+
+`session_archive.py` takes only the conversation from a session record: what the person typed and
+what the agent answered in words. Tool calls, their output, the model's thinking and helpers are
+left out. The conversation is under one percent of the record: on a live install, 349 sessions
+weighing 2 GB produced an 8 MB archive.
+
+A session goes into the archive once its record has not changed for half an hour. The end-of-turn
+hook takes five sessions at a time; for a first pass over all of them: `python scripts/session_archive.py`.
+The archive lives in `~/.agent-memory/sessions`, one folder per project, one file per session.
+
+To search: `python scripts/memory_search.py "what we decided about the discount" --sessions`. A hit
+is the person's message together with the agent's answer, with project and time.
+
+Keys, tokens and "password: …" are cut out by patterns. A pattern is not a guarantee: keep the
+archive on your own machine and do not put it in git. From Codex records, only conversations with
+a person go into the archive; `codex exec` runs and helpers are skipped.
+
+## Part 3. Automation
+
+Five hook files; the `memory-recall-hook.py` hints are described in "Memory at the right moment". All of them read settings from `memory-kit.json` next to the `hooks` folder. No settings
+file, no output. An error inside a hook never gets in the way of the session.
+
+| Event | File | What it does |
 |---|---|---|
-| начало сессии | `session-start-context.js` | подтягивает изменения из удалённого репозитория; подкладывает `HANDOFF.md`, три записи журнала, оглавление памяти |
-| конец хода | `session-summary-check.js` | раз в день напоминает сохранить итоги, если сессия была рабочей |
-| конец хода | `memory-index-hook.py stop` | пересобирает оглавления и список проектов; через `memory_upkeep.py` обрезает журналы до 5 записей (старое — в `projects/archive/`) и проверяет ссылки оглавлений: битая ссылка один раз останавливает конец хода |
-| после записи файла (Claude Code) | `memory-index-hook.py post` | пересобирает оглавление, если записан файл в папке памяти |
-| перед сжатием разговора (Claude Code) | `session-start-context.js precompact` | кладёт копию `HANDOFF.md` в `handoff-snapshots/<проект>/` папки агента, хранит 10 последних; после сжатия хук начала сессии говорит агенту, где копия, и просит дописать решения из сжатой части |
+| session start | `session-start-context.js` | pulls changes from the remote repository; adds `HANDOFF.md`, three log entries and the memory index |
+| end of turn | `session-summary-check.js` | once a day reminds you to save the results if the session was a working one |
+| end of turn | `memory-index-hook.py stop` | rebuilds the indexes and the project list; through `memory_upkeep.py` trims logs to 5 entries (older ones go to `projects/archive/`) and checks index links: a broken link stops the end of the turn once |
+| after a file write (Claude Code) | `memory-index-hook.py post` | rebuilds the index if the file written is in a memory folder |
+| before the conversation is compacted (Claude Code) | `session-start-context.js precompact` | saves a copy of `HANDOFF.md` to `handoff-snapshots/<project>/` in the agent's folder, keeps the last 10; after compaction the session-start hook tells the agent where the copy is and asks it to add decisions from the compacted part |
 
-### Подтягивание изменений в начале сессии
+### Pulling changes at session start
 
-Хук скачивает историю удалённого репозитория и смотрит, отстала ли локальная ветка.
+The hook fetches the remote repository's history and checks whether the local branch is behind.
 
-- Нового нет — молчит.
-- Новое есть, несохранённых правок нет, слияние не нужно — обновляет файлы и сообщает агенту,
-  что именно пришло.
-- Новое есть, но в папке лежат несохранённые правки или ветка ушла вперёд — файлы не трогает,
-  только сообщает. Агент предложит обновиться, а не сделает это молча.
+- Nothing new: it stays quiet.
+- Something new, no unsaved edits, no merge needed: it updates the files and tells the agent
+  what came in.
+- Something new, but the folder has unsaved edits or the branch has moved ahead: it leaves the
+  files alone and only reports. The agent will offer to update rather than do it silently.
 
-На сеть хук ждёт не дольше десяти секунд и не задаёт вопросов о пароле.
+The hook waits for the network no longer than ten seconds and never asks for a password.
 
-### Что подкладывается в контекст
+### What is added to the context
 
-- `HANDOFF.md` из текущей папки, до 5 тысяч знаков.
-- Три последние записи журнала `projects/<имя папки>.md`, до 3,5 тысячи знаков.
-- Оглавление общей памяти.
-- Для Codex ещё оглавление памяти проекта: сам он его не подгружает.
+- `HANDOFF.md` from the current folder, up to 5 thousand characters.
+- The last three entries of the `projects/<folder name>.md` log, up to 3.5 thousand characters.
+- The shared-memory index.
+- For Codex, the project memory index as well: it does not load it on its own.
 
-Бюджеты раздельные: длинная записка не вытесняет журнал.
+The budgets are separate: a long note does not push out the log.
 
-### Напоминание в конце хода
+### End-of-turn reminder
 
-Срабатывает, только если запись сессии уже больше 150 КБ, то есть шла работа, а не разговор.
-Проверяет два признака: в журнал сегодня ничего не писали; записка проекта не менялась больше
-двух часов. Выводит одну строку человеку и больше в этот день не беспокоит. Ничего не блокирует.
+It fires only when the session record is already over 150 KB, meaning there was work and not
+just talk. It checks two signs: nothing was written to the log today; the project note has not
+changed for more than two hours. It shows the person one line and does not bother them again
+that day. It blocks nothing.
 
-### Список проектов
+### Project list
 
-`project_index.py` обходит корневую папку на два уровня вглубь, находит папки с `HANDOFF.md`
-и берёт из каждой три строки: «Обновлено:», «## Статус:» и первую строку раздела
-«## Следующий шаг». Поэтому вид этих строк в записке менять нельзя.
+`project_index.py` walks the root folder two levels deep, finds folders with `HANDOFF.md` and takes
+three lines from each: «Обновлено:» ("Updated:"), «## Статус:» ("## Status:") and the first line of
+the «## Следующий шаг» ("## Next step") section. So the form of these lines in the note must not change.
 
-## Часть 4. Записка HANDOFF и журнал
+## Part 4. The HANDOFF note and the log
 
-**`HANDOFF.md`** лежит в корне проекта и отвечает на вопрос «где мы сейчас». Не больше 25 строк,
-всегда одни и те же разделы: статус, текущее состояние, задачи, блокеры, что пробовали
-и не сработало, хрупкие места, следующий шаг, промпт для следующей сессии. Он перезаписывается.
+**`HANDOFF.md`** sits in the project root and answers "where are we now". No more than 25 lines,
+always the same sections: status, current state, tasks, blockers, what was tried and did not work,
+fragile spots, next step, a prompt for the next session. It is overwritten.
 
-**Журнал** `projects/<Проект>.md` отвечает на вопрос «что было». Новая запись ставится сверху
-и не правится: дата и тема, «Сделано», «Дальше», «Файлы», «Статус».
+**The log** `projects/<Project>.md` answers "what happened". A new entry goes on top and is not
+edited: date and topic, «Сделано» ("Done"), «Дальше» ("Next"), «Файлы» ("Files"), «Статус» ("Status").
 
-Записка короткая и всегда в контексте. Журнал длинный, из него в контекст попадают три
-последние записи, остальное агент открывает по надобности.
+The note is short and always in context. The log is long; only its last three entries go into
+context, and the agent opens the rest when needed.
 
-## Часть 5. Порядок конца сессии
+## Part 5. The end-of-session routine
 
-Человек говорит «стоп». Агент делает шесть шагов:
+The person says «стоп» ("stop"). The agent takes six steps:
 
-1. Обновляет `HANDOFF.md`, в конце пишет промпт для следующей сессии.
-2. Коммитит правки сессии поимённо и пушит, если у проекта есть удалённый репозиторий.
-   Незнакомые файлы показывает списком и спрашивает.
-3. Ищет зависшие фоновые процессы, показывает их и спрашивает, что остановить.
-4. Пишет запись в журнал.
-5. Разбирает сессию: что пошло не так, что сработало. Сверяется с памятью и заводит правило,
-   только если такого ещё нет. Ноль новых правил — нормальный исход.
-6. Выводит промпт в чат.
+1. Updates `HANDOFF.md` and writes a prompt for the next session at the end.
+2. Commits the session's edits file by file and pushes if the project has a remote repository.
+   Unfamiliar files are shown as a list, and the agent asks.
+3. Looks for stuck background processes, shows them and asks what to stop.
+4. Writes a log entry.
+5. Reviews the session: what went wrong, what worked. Checks memory and creates a rule only
+   if there is no such rule yet. Zero new rules is a normal outcome.
+6. Prints the prompt in the chat.
 
-Оглавление и список проектов после этого пересобирает хук.
+After that the hook rebuilds the index and the project list.
 
-Порядок записан в файле правил, а не зашит в скрипт: шаги требуют суждения. Скриптам отдано
-только то, что суждения не требует: сборка оглавлений, списка проектов, подгрузка контекста.
+The routine is written in the rules file rather than hard-coded in a script: its steps need
+judgment. Scripts get only what needs no judgment: building the indexes and the project list,
+loading context.
 
-### Откуда берутся новые правила
+### Where new rules come from
 
-- **Разбор в конце сессии** — шаг 5.
-- **Поправка по ходу.** Человек сказал «не так» или «да, именно», и агент сразу пишет правило
-  с его словами в `origin_quote`.
-- **Повторение.** Ситуация встретилась снова, и «проба» становится «правилом».
+- **The end-of-session review**: step 5.
+- **A correction along the way.** The person says "not like that" or "yes, exactly", and the agent
+  writes a rule right away with their words in `origin_quote`.
+- **Repetition.** The situation comes up again, and a "trial" becomes a "rule".
 
-## Особенности Codex
+## Codex specifics
 
-- Файл правил называется `AGENTS.md`, хуки прописываются в `~/.codex/hooks.json`. События
-  и вид ответа хука у Codex те же, что у Claude Code, поэтому файлы хуков общие.
-- Новые хуки Codex пропускает, пока им не доверили: команда `/hooks`. Если этого не сделать, агент сам скажет об этом в первом ответе сессии: хук старта кладёт в контекст строку-метку, а раздел правил велит предупредить человека, когда метки нет.
-- Своей подгрузки памяти у Codex нет, оба оглавления подкладывает хук начала сессии.
-- Правку файлов Codex делает другим инструментом, поэтому оглавление пересобирается
-  не сразу после записи, а в конце хода.
-- Чтобы Codex мог писать в память, папка памяти добавляется в `writable_roots`
-  раздела `[sandbox_workspace_write]` файла `config.toml`.
+- The rules file is called `AGENTS.md`; hooks are registered in `~/.codex/hooks.json`. Codex
+  has the same events and hook response format as Claude Code, so the hook files are shared.
+- Codex skips new hooks until they are trusted: the `/hooks` command. If you skip this, the agent will tell you itself in the first answer of the session: the start hook puts a marker line into the context, and the rules section tells the agent to warn the person when the marker is missing.
+- Codex has no memory loading of its own; both indexes are added by the session-start hook.
+- Codex edits files with a different tool, so the index is rebuilt not right after a write
+  but at the end of the turn.
+- For Codex to be able to write to memory, the memory folder is added to `writable_roots`
+  in the `[sandbox_workspace_write]` section of `config.toml`.
 
-## Частые ошибки
+## Common mistakes
 
-1. **Дописывать оглавление руками.** Строка переедет в файл правила, но проще сразу писать
-   `index_line`.
-2. **Строка-указатель без правила.** «Про деплой — см. файл» не работает: до файла не доходят.
-3. **Одно правило в двух местах.** Через месяц копии расходятся. Выбрать уровень и оставить одно.
-4. **Закон из одного случая.** Для этого есть «проба».
-5. **Журнал вместо записки.** В `HANDOFF.md` только текущее состояние, история идёт в журнал.
-6. **Общая память внутри `.claude`.** Claude Code будет спрашивать разрешение на каждую запись.
+1. **Adding to the index by hand.** The line will move into the rule file, but it is simpler to
+   write `index_line` straight away.
+2. **A pointer line with no rule.** "About deploys, see the file" does not work: nobody gets to the file.
+3. **One rule in two places.** Within a month the copies drift apart. Pick a level and keep one.
+4. **A law from one case.** That is what the "trial" status is for.
+5. **A log instead of a note.** `HANDOFF.md` holds only the current state; history goes to the log.
+6. **Shared memory inside `.claude`.** Claude Code will ask for permission on every write.
 
-## Что изменилось с первой версии
+## What changed since the first version
 
-| Было (апрель 2026) | Стало (октябрь 2026) |
+| Before (April 2026) | Now (October 2026) |
 |---|---|
-| оглавление ведёт агент руками | оглавление собирает скрипт по бюджету, лишнее уходит в каталог |
-| строка оглавления — ссылка с подписью | строка несёт правило целиком |
-| разделы оглавления по темам | разделы по моменту работы |
-| пометка «вечное правило» (`ttl: evergreen`) | уверенность «проба или правило» и счётчик встреч |
-| неизвестно, откуда правило | поля `origin_*`: дата, проект, кто сказал, цитата |
-| хук начала подкладывает записку и журнал | ещё подтягивает изменения из удалённого репозитория и оглавление памяти |
-| «стоп» из четырёх шагов | шесть шагов: добавились коммит с пушем и зависшие процессы |
-| список проектов обновляется вручную | собирается в конце каждого хода |
-| только Claude Code | Claude Code и Codex на одной памяти |
-| установка по тексту из десяти шагов | установщик с пробным прогоном, проверкой и удалением |
+| the agent keeps the index by hand | a script builds the index within a budget; the overflow goes to a catalogue |
+| an index line is a link with a caption | the line carries the whole rule |
+| index sections by topic | sections by moment of work |
+| an "eternal rule" mark (`ttl: evergreen`) | confidence as "trial or rule" plus a counter of occurrences |
+| no telling where a rule came from | `origin_*` fields: date, project, who said it, quote |
+| the start hook adds the note and the log | it also pulls changes from the remote repository and adds the memory index |
+| a four-step "stop" | six steps: commit with push and stuck processes were added |
+| the project list is updated by hand | it is rebuilt at the end of every turn |
+| Claude Code only | Claude Code and Codex on one memory |
+| installation as a ten-step text | an installer with a dry run, a check and uninstall |
