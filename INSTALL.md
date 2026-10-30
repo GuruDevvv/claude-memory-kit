@@ -27,6 +27,7 @@ Find out and briefly tell the person:
 
 - whether `python` (3.8 or newer), `node` and `git` are installed. Something missing? Say so and stop;
 - which agents are present: the folders `~/.claude` and `~/.codex`;
+- whether another agent's folder has a `memory-kit.json`. If it does, this agent gets the same `central` and `projects_dir`: agents share one memory. `install.py` does this on its own unless `--memory` is given, and the check fails on a mismatch;
 - whether the agent folder has a `memory-kit.json`. If it does, this is an update: the settings are kept, go to step 3;
 - which hooks are already configured: `~/.claude/settings.json`, `~/.codex/hooks.json`;
 - whether the agent folder's `hooks/` and `scripts/` contain files with the names from step 3;

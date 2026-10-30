@@ -130,6 +130,17 @@ def main():
     root = os.path.expanduser(cfg.get("root") or "")
     line(os.path.exists(os.path.join(central, "MEMORY.head.md")), "шапка оглавления общей памяти MEMORY.head.md")
 
+    for other in TOOLS:
+        other_cfg = os.path.join(os.path.dirname(agent_dir), "." + other, "memory-kit.json")
+        if other != tool and os.path.exists(other_cfg):
+            try:
+                theirs = json.loads(read(other_cfg)).get("central") or ""
+            except ValueError:
+                theirs = ""
+            if theirs:
+                line(norm(os.path.expanduser(theirs)) == norm(central),
+                     "общая память та же, что у %s: %s" % (other, theirs))
+
     kit = args.kit or cfg.get("kit_dir")
     kit = os.path.abspath(os.path.expanduser(kit)) if kit else None
     if kit and not os.path.isdir(os.path.join(kit, "hooks")):

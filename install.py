@@ -358,6 +358,15 @@ def layout(args):
         tools = [t for t in TOOLS if os.path.isdir(os.path.join(home, TOOLS[t]["dir"]))]
         if not tools:
             raise SystemExit("В %s нет ни .claude, ни .codex. Запусти агента хотя бы раз или укажи --tool." % fwd(home))
+    if not args.memory:
+        # Набор уже стоит у этого или другого агента: память у них одна, вторую пустую не заводим
+        for tool in tools + [t for t in TOOLS if t not in tools]:
+            cfg = load_json(os.path.join(home, TOOLS[tool]["dir"], "memory-kit.json"))
+            if cfg.get("central"):
+                central = os.path.abspath(os.path.expanduser(cfg["central"]))
+                memory_home = os.path.dirname(central) if os.path.basename(central) == "central" else central
+                projects_dir = cfg.get("projects_dir") or os.path.join(memory_home, "projects")
+                return home, root, tools, os.path.abspath(os.path.expanduser(projects_dir)), central, memory_home
     memory_home = os.path.abspath(os.path.expanduser(args.memory)) if args.memory else os.path.join(home, ".agent-memory")
     if os.sep + ".claude" + os.sep in memory_home + os.sep:
         raise SystemExit("Общую память нельзя класть внутрь папки .claude: Claude Code считает файлы там\n"
@@ -429,7 +438,8 @@ def install(args):
             settings = allow_memory_dir(settings, memory_home, home)
         doer.write(hooks_path, dump_json(settings))
         if tool == "codex":
-            codex_writable_note(doer, tool_dir, [memory_home] + ([projects_dir] if "claude" in tools else []))
+            inside = os.path.normcase(projects_dir).startswith(os.path.normcase(memory_home) + os.sep)
+            codex_writable_note(doer, tool_dir, [memory_home] + ([] if inside else [projects_dir]))
         root_rules = os.path.join(root, spec["rules"])
         values = {"CENTRAL": fwd(central), "PROJECTS_DIR": fwd(projects_dir), "ROOT": fwd(root),
                   "ROOT_RULES": fwd(root_rules), "AUTOLOAD": AUTOLOAD[tool], "HOOKCHECK": HOOKCHECK[tool], "ZOMBIES": zombies_text(tool_dir),

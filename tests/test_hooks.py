@@ -468,5 +468,49 @@ subprocess.run([sys.executable, os.path.join(home, ".claude", "scripts", "memory
 check("чистка не архивирует свежее в журнале, который пишут вниз", io.open(asc, encoding="utf-8").read() == asc_text)
 os.remove(asc)
 
+# второй агент ставится к уже установленному: память общая, а не новая пустая
+box2 = tempfile.mkdtemp(prefix="mkh2_")
+home2, root2 = os.path.join(box2, "home"), os.path.join(box2, "work")
+for d in (os.path.join(home2, ".claude"), os.path.join(home2, ".codex"), root2):
+    os.makedirs(d)
+mine = os.path.join(box2, "mymem")
+
+
+def install2(*args):
+    return subprocess.run([sys.executable, os.path.join(KIT, "install.py"), "--home", home2, "--root", root2] + list(args),
+                          capture_output=True, text=True, encoding="utf-8", errors="replace", env=env)
+
+
+def cfg2(tool):
+    return json.load(open(os.path.join(home2, tool, "memory-kit.json"), encoding="utf-8"))
+
+
+def check2():
+    return subprocess.run([sys.executable, os.path.join(home2, ".codex", "scripts", "kit_check.py")], cwd=root2,
+                          capture_output=True, text=True, encoding="utf-8", errors="replace", env=env)
+
+
+install2("--tool", "claude", "--memory", mine)
+write(os.path.join(home2, ".codex", "AGENTS.md"), "мои правила\n")
+r = install2("--tool", "codex", "--dry-run")
+check("второй агент: пробный прогон показывает ту же память", ".agent-memory" not in r.stdout and "mymem" in r.stdout, r.stdout[:400])
+check("второй агент: пробный прогон ничего не пишет", not os.path.exists(os.path.join(home2, ".codex", "memory-kit.json")))
+install2("--tool", "codex")
+same = cfg2(".claude"), cfg2(".codex")
+check("второй агент: память и папка проектов общие", same[0]["central"] == same[1]["central"]
+      and same[0]["projects_dir"] == same[1]["projects_dir"], str(same[1]))
+check("второй агент: вторая память не заведена", not os.path.exists(os.path.join(home2, ".agent-memory")))
+check("второй агент: свои правила целы", "мои правила" in io.open(os.path.join(home2, ".codex", "AGENTS.md"), encoding="utf-8").read())
+toml = io.open(os.path.join(home2, ".codex", "config.toml"), encoding="utf-8").read()
+check("второй агент: Codex может писать в общую память", "mymem" in toml and ".claude/projects" in toml.replace("\\\\", "/"), toml)
+r = check2()
+check("проверка: память общая — проходит", r.returncode == 0 and "общая память та же" in r.stdout, r.stdout[-500:])
+c = cfg2(".codex")
+c["central"] = os.path.join(box2, "other")
+write(os.path.join(home2, ".codex", "memory-kit.json"), json.dumps(c, ensure_ascii=False))
+os.makedirs(c["central"])
+r = check2()
+check("проверка: память разная — ловит", r.returncode != 0 and "[НЕТ] общая память та же" in r.stdout, r.stdout[-500:])
+
 print(f"\nитого: {sum(results)} из {len(results)}")
 sys.exit(0 if all(results) else 1)
