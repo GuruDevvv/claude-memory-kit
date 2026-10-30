@@ -444,9 +444,7 @@ check("без ключа журнал на старом месте", "запис
 
 note_path = os.path.join(proj, "HANDOFF.md")
 note_saved = io.open(note_path, encoding="utf-8").read()
-write(note_path, "# HANDOFF — Shop
-коротко
-")
+write(note_path, "# HANDOFF — Shop\nкоротко\n")
 code, out = kit_check(".claude")
 check("проверка: без причин предупреждений нет", "[!!]" not in out, out[-600:])
 write(note_path, "# HANDOFF\n" + "длинно " * 1000)
