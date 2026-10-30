@@ -23,6 +23,7 @@
 Память при --uninstall не удаляется никогда.
 """
 import argparse
+import glob
 import json
 import os
 import re
@@ -400,6 +401,14 @@ def install(args):
         doer.mkdir(os.path.join(central, d))
     head = os.path.join(central, "MEMORY.head.md")
     fresh = not os.path.exists(head)
+    notes = glob.glob(os.path.join(central, "**", "*.md"), recursive=True)
+    if fresh and notes:
+        # Первая сборка переписывает оглавление и дописывает служебные строки в начало файлов памяти
+        backup = central.rstrip("\\/") + ".bak-" + STAMP
+        say("  ! первая сборка оглавления: перепишет MEMORY.md и INDEX.md, а в файлы памяти (%d) допишет служебные строки" % len(notes))
+        say("    копия всей папки памяти: " + fwd(backup))
+        if not args.dry_run:
+            shutil.copytree(central, backup)
     if fresh:
         doer.write(head, render("MEMORY.head.md", {}), backup=False)
         feedback = os.path.join(central, "feedback")

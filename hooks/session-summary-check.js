@@ -287,7 +287,7 @@ try {
   };
   let journalToday = true; // папки нет — не ворчим
   const journalFile = kit.journalFile(cfg, projectPath);
-  if (cfg.journal_path && kit.isProject(cfg, projectPath)) {
+  if (kit.journalOverride(cfg, projectPath) && kit.isProject(cfg, projectPath)) {
     try { journalToday = fs.statSync(journalFile).mtimeMs >= todayStart; } catch (e) { journalToday = false; }
   } else if (fs.existsSync(journals)) {
     // В проекте смотрим его журнал: запись в чужой не значит, что этот сохранён.

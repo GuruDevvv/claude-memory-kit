@@ -230,10 +230,13 @@ def main():
         limit, "; длиннее: " + ", ".join(long_notes[:5]) + (" и ещё %d" % (len(long_notes) - 5) if len(long_notes) > 5 else "")
         + ". Конец такой записки агент видит, только если откроет файл" if long_notes else ""))
 
-    if cfg.get("journal_path"):
-        here = os.getcwd()
-        name = os.path.basename(here)
-        journal = os.path.join(here, os.path.expanduser(str(cfg["journal_path"]).replace("{project}", name)))
+    here = os.getcwd()
+    name = os.path.basename(here)
+    custom = cfg.get("journal_path") or ""
+    if isinstance(custom, dict):
+        custom = custom.get(name) or ""
+    if custom:
+        journal = os.path.join(here, os.path.expanduser(str(custom).replace("{project}", name)))
         warn(os.path.isfile(journal), "свой журнал найден для папки %s: %s" % (name, journal.replace("\\", "/")))
 
     say()

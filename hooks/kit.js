@@ -33,13 +33,24 @@ function projectMemoryDir(cfg, cwd) {
 }
 
 /**
- * Файл журнала проекта. По умолчанию <central>/projects/<Проект>.md. Ключ journal_path задаёт свой адрес:
+ * Свой адрес журнала из ключа journal_path: строка действует на все проекты,
+ * словарь {"имя папки": "адрес"} только на названные. Нет адреса — пустая строка.
+ */
+function journalOverride(cfg, project) {
+  const j = cfg.journal_path;
+  if (!j) return '';
+  return typeof j === 'string' ? j : String(j[path.basename(project)] || '');
+}
+
+/**
+ * Файл журнала проекта. По умолчанию <central>/projects/<Проект>.md. Свой адрес: journalOverride,
  * {project} заменяется именем проекта, относительный путь считается от папки проекта.
  */
 function journalFile(cfg, project) {
   const name = path.basename(project);
-  if (!cfg.journal_path) return path.join(cfg.central, 'projects', name + '.md');
-  const p = String(cfg.journal_path).split('{project}').join(name).replace(/^~(?=[\\/]|$)/, os.homedir());
+  const custom = journalOverride(cfg, project);
+  if (!custom) return path.join(cfg.central, 'projects', name + '.md');
+  const p = custom.split('{project}').join(name).replace(/^~(?=[\\/]|$)/, os.homedir());
   return path.resolve(project, p);
 }
 
@@ -115,5 +126,5 @@ function driftFromKit(cfg) {
   return out;
 }
 
-module.exports = { journalFile, loadConfig, slug, projectMemoryDir, samePath, inside, projectDir, isProject, driftFromKit,
+module.exports = { journalFile, journalOverride, loadConfig, slug, projectMemoryDir, samePath, inside, projectDir, isProject, driftFromKit,
   KIT_FILES, HOOKS_ALIVE };

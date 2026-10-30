@@ -218,8 +218,9 @@ try {
   }
   if (kit.isProject(cfg, project)) {
     const journalPath = kit.journalFile(cfg, project);
-    const journalName = cfg.journal_path ? journalPath.replace(/\\/g, '/') : 'projects/' + projectName + '.md';
-    const journalNote = cfg.journal_path ? ' (' + journalName + ')' : '';
+    const customJournal = kit.journalOverride(cfg, project);
+    const journalName = customJournal ? journalPath.replace(/\\/g, '/') : 'projects/' + projectName + '.md';
+    const journalNote = customJournal ? ' (' + journalName + ')' : '';
     if (fs.existsSync(journalPath)) {
       const journal = fs.readFileSync(journalPath, 'utf-8');
       const first = journal.search(/^## \[/m); // вступление файла пропускаем
@@ -231,7 +232,7 @@ try {
           parts.push('### Последние записи журнала (' + Math.min(take, entries.length) + ' из ' + entries.length + ')' + journalNote + '\n\n' +
             clip(recent, JOURNAL_MAX, 'журнал обрезан — открой ' + journalName) + '\n');
         }
-      } else if (cfg.journal_path && journal.trim()) {
+      } else if (customJournal && journal.trim()) {
         // свой журнал без заголовков «## [дата]»: границ записей не видно, отдаём конец файла
         parts.push('### Конец журнала' + journalNote + '\n\n' + journal.trim().slice(-JOURNAL_MAX) + '\n');
       }

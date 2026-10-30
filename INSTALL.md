@@ -16,7 +16,8 @@ Clean machine with no settings of your own? It is faster to run `install.py` as 
 2. Copy the kit's files as they are and do not edit them. Need different behaviour? Add a separate
    hook with its own name. The check will report an edited kit file as a mismatch.
 3. Do not grant yourself permissions. Need a line in `permissions` or in `config.toml`? Show it
-   to the person and ask them to add it themselves.
+   to the person and ask them to add it themselves. The one exception is what `install.py` itself
+   adds: write access to the memory folders. It is in the dry-run plan, so the person's "yes" covers it.
 4. Do not read or copy login files (`auth.json`, `.credentials.json` and the like).
 5. Before writing to the agent's settings, show the person what will change and wait for a "yes".
 6. Say "done" only after the check has answered "Всё на месте." ("All in place.").
@@ -87,7 +88,7 @@ Write `<agent folder>/memory-kit.json`. The hooks look for it next to the `hooks
 | `inject_project_index` | the same for project memory. Claude Code loads it on its own, so `false` there, `true` for Codex |
 | `sync_on_start` | at session start, pull new commits from the server in the folder the agent is opened in. Files are updated only if there are no unsaved edits and no merge is needed |
 | `journal_entries` | how many recent project journal entries to show at start |
-| `journal_path` | the person keeps the project journal somewhere else: its address, for example `docs/{project}-log.md`. `{project}` is the project name, a relative path starts at the project folder. Entries may be newest first or newest last. A journal at a custom address is not trimmed and search does not see it |
+| `journal_path` | the person keeps the project journal somewhere else: its address, for example `docs/{project}-log.md`. `{project}` is the project name, a relative path starts at the project folder. A string applies to every project; for one project's journal use a map, `{"folder-name": "path"}`, and the rest keep the standard address. Entries may be newest first or newest last. A journal at a custom address is not trimmed and search does not see it |
 | `journal_keep` | how many entries to keep in the journal; the rest move to `projects/archive/`. Default 5, `0` means never trim |
 | `start_max_chars` | a cap on the text the hook hands over at start. For Codex set `5800`: it passes no more than that to the model and cuts out the middle. You then get the project note, one journal entry, the "Всегда" ("Always") section and the address of the full index. Claude Code does not need this key |
 | `sessions_dir` | a custom location for the conversation archive, if it is not next to `central` |

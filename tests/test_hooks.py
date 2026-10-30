@@ -438,6 +438,18 @@ os.utime(log, (past, past))
 check("свой журнал не тронут сегодня: напоминание называет его", "Shop-log.md" in stop_hook(proj))
 os.utime(log, None)
 check("свой журнал тронут сегодня: про журнал молчит", "в журнал сегодня" not in stop_hook(proj))
+write(log, "# Мой журнал\n\n## [2026-10-20 10:00]\nзапись по словарю\n")
+cfg_new["journal_path"] = {"Shop": "docs/{project}-log.md"}
+write(cfg_file, json.dumps(cfg_new, ensure_ascii=False))
+ctx = start_hook(proj)
+check("свой журнал словарём: названный проект читает свой адрес", "запись по словарю" in ctx and "запись журнала магазина" not in ctx, ctx[:400])
+r = subprocess.run([sys.executable, os.path.join(home, ".claude", "scripts", "kit_check.py")], cwd=proj,
+                   capture_output=True, text=True, encoding="utf-8", errors="replace", env=env)
+check("свой журнал словарём: проверка его видит", "свой журнал найден" in r.stdout, r.stdout[-600:])
+cfg_new["journal_path"] = {"Другой": "docs/{project}-log.md"}
+write(cfg_file, json.dumps(cfg_new, ensure_ascii=False))
+ctx = start_hook(proj)
+check("свой журнал словарём: остальные проекты на стандартном адресе", "запись журнала магазина" in ctx and "запись по словарю" not in ctx, ctx[:400])
 write(cfg_file, cfg_saved)
 ctx = start_hook(proj)
 check("без ключа журнал на старом месте", "запись журнала магазина" in ctx and "Shop-log" not in ctx, ctx[:400])
@@ -511,6 +523,32 @@ write(os.path.join(home2, ".codex", "memory-kit.json"), json.dumps(c, ensure_asc
 os.makedirs(c["central"])
 r = check2()
 check("проверка: память разная — ловит", r.returncode != 0 and "[НЕТ] общая память та же" in r.stdout, r.stdout[-500:])
+
+# первая сборка над чужой памятью: план о ней говорит, копия есть, тексты целы
+box3 = tempfile.mkdtemp(prefix="mkh3_")
+home3, root3 = os.path.join(box3, "home"), os.path.join(box3, "work")
+os.makedirs(root3)
+mem3 = os.path.join(home3, ".claude", "projects", "own", "memory")
+hand = "# Память\n\n- [Правило](rule.md) — моё правило\n"
+write(os.path.join(mem3, "MEMORY.md"), hand)
+write(os.path.join(mem3, "rule.md"), "---\nname: rule\n---\n\nтело правила\n")
+write(os.path.join(home3, ".claude", "memory-kit.json"), json.dumps({"central": mem3, "projects_dir": os.path.join(home3, ".claude", "projects")}))
+
+
+def install3(*args):
+    return subprocess.run([sys.executable, os.path.join(KIT, "install.py"), "--home", home3, "--root", root3, "--tool", "codex"] + list(args),
+                          capture_output=True, text=True, encoding="utf-8", errors="replace", env=env)
+
+
+r = install3("--dry-run")
+check("первая сборка: план о ней говорит", "первая сборка оглавления" in r.stdout and "копия всей папки памяти" in r.stdout, r.stdout[:600])
+check("первая сборка: пробный прогон копий не делает", os.listdir(os.path.dirname(mem3)) == ["memory"])
+r = install3()
+copies = [d for d in os.listdir(os.path.dirname(mem3)) if d.startswith("memory.bak-")]
+check("первая сборка: копия памяти сделана", len(copies) == 1 and io.open(os.path.join(os.path.dirname(mem3), copies[0], "MEMORY.md"), encoding="utf-8").read() == hand, str(copies))
+check("первая сборка: текст правила цел", "тело правила" in io.open(os.path.join(mem3, "rule.md"), encoding="utf-8").read())
+r = install3()
+check("повторная установка: новой копии нет", len([d for d in os.listdir(os.path.dirname(mem3)) if d.startswith("memory.bak-")]) == 1)
 
 print(f"\nитого: {sum(results)} из {len(results)}")
 sys.exit(0 if all(results) else 1)
