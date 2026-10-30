@@ -52,6 +52,9 @@ def write_atomic(path, text):
     return tmp
 
 
+ENTRY_DATE = re.compile(r"## \[\s*(\d{4}-\d{2}-\d{2}(?:[ T]\d{2}:\d{2})?)")
+
+
 def split_journal(text):
     """(вступление, [записи]) — запись начинается строкой «## [дата]»."""
     parts = ENTRY.split(text)
@@ -67,6 +70,9 @@ def trim_journal(path, keep, dry=False):
     intro, entries = split_journal(text)
     if len(entries) <= keep:
         return 0
+    dates = [ENTRY_DATE.match(e) for e in (entries[0], entries[-1])]
+    if all(dates) and dates[0].group(1) < dates[1].group(1):
+        return 0                                     # журнал дописывают вниз: первые записи здесь самые старые
     stay, move = entries[:keep], entries[keep:]
     if dry:
         return len(move)

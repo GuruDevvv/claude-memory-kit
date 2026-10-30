@@ -157,6 +157,14 @@ function afterCompact(cfg, projectName) {
     'Если в сжатой части были решения, которых нет в HANDOFF.md, допиши их сейчас, пока помнишь.\n';
 }
 
+// Записи журнала с самой свежей первой: журнал, который дописывают вниз, переворачиваем по датам заголовков.
+function newestFirst(entries) {
+  const date = e => (e.match(/^\s*(\d{4}-\d{2}-\d{2}(?:[ T]\d{2}:\d{2})?)/) || [])[1] || '';
+  const a = date(entries[0]);
+  const b = date(entries[entries.length - 1]);
+  return a && b && a < b ? entries.slice().reverse() : entries;
+}
+
 function clip(text, max, note) {
   return text.length > max ? text.slice(0, max) + '\n\n[...' + note + ']' : text;
 }
@@ -205,21 +213,27 @@ try {
   if (fs.existsSync(handoffPath)) {
     const handoff = fs.readFileSync(handoffPath, 'utf-8').trim();
     parts.push('### HANDOFF.md' + (kit.samePath(project, cwd) ? '' : ' (' + handoffPath + ')') + '\n\n' +
-      clip(handoff, HANDOFF_MAX, 'HANDOFF обрезан — открой HANDOFF.md полностью') + '\n');
+      clip(handoff, HANDOFF_MAX, 'HANDOFF обрезан: показано ' + HANDOFF_MAX + ' из ' + handoff.length +
+        ' знаков. Прочитай HANDOFF.md целиком до начала работы') + '\n');
   }
   if (kit.isProject(cfg, project)) {
-    const journalPath = path.join(cfg.central, 'projects', projectName + '.md');
+    const journalPath = kit.journalFile(cfg, project);
+    const journalName = cfg.journal_path ? journalPath.replace(/\\/g, '/') : 'projects/' + projectName + '.md';
+    const journalNote = cfg.journal_path ? ' (' + journalName + ')' : '';
     if (fs.existsSync(journalPath)) {
       const journal = fs.readFileSync(journalPath, 'utf-8');
       const first = journal.search(/^## \[/m); // вступление файла пропускаем
       if (first >= 0) {
-        const entries = journal.slice(first).split(/^## \[/m).filter(e => e.trim().length > 0);
+        const entries = newestFirst(journal.slice(first).split(/^## \[/m).filter(e => e.trim().length > 0));
         const take = tight ? 1 : (cfg.journal_entries || 3);
         const recent = entries.slice(0, take).map(e => '## [' + e.trim()).join('\n\n');
         if (recent) {
-          parts.push('### Последние записи журнала (' + Math.min(take, entries.length) + ' из ' + entries.length + ')\n\n' +
-            clip(recent, JOURNAL_MAX, 'журнал обрезан — открой projects/' + projectName + '.md') + '\n');
+          parts.push('### Последние записи журнала (' + Math.min(take, entries.length) + ' из ' + entries.length + ')' + journalNote + '\n\n' +
+            clip(recent, JOURNAL_MAX, 'журнал обрезан — открой ' + journalName) + '\n');
         }
+      } else if (cfg.journal_path && journal.trim()) {
+        // свой журнал без заголовков «## [дата]»: границ записей не видно, отдаём конец файла
+        parts.push('### Конец журнала' + journalNote + '\n\n' + journal.trim().slice(-JOURNAL_MAX) + '\n');
       }
     }
   }

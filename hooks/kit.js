@@ -4,6 +4,7 @@
  * (их пишет install.py). Нет файла настроек — хуки молча ничего не делают.
  */
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 
 function loadConfig() {
@@ -29,6 +30,17 @@ function projectMemoryDir(cfg, cwd) {
     }
   } catch (e) { /* папки ещё нет */ }
   return path.join(cfg.projects_dir, slug(cwd), 'memory');
+}
+
+/**
+ * Файл журнала проекта. По умолчанию <central>/projects/<Проект>.md. Ключ journal_path задаёт свой адрес:
+ * {project} заменяется именем проекта, относительный путь считается от папки проекта.
+ */
+function journalFile(cfg, project) {
+  const name = path.basename(project);
+  if (!cfg.journal_path) return path.join(cfg.central, 'projects', name + '.md');
+  const p = String(cfg.journal_path).split('{project}').join(name).replace(/^~(?=[\\/]|$)/, os.homedir());
+  return path.resolve(project, p);
 }
 
 function samePath(a, b) {
@@ -103,5 +115,5 @@ function driftFromKit(cfg) {
   return out;
 }
 
-module.exports = { loadConfig, slug, projectMemoryDir, samePath, inside, projectDir, isProject, driftFromKit,
+module.exports = { journalFile, loadConfig, slug, projectMemoryDir, samePath, inside, projectDir, isProject, driftFromKit,
   KIT_FILES, HOOKS_ALIVE };

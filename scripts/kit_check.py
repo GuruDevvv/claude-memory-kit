@@ -27,6 +27,8 @@ SCRIPT_FILES = ["memory_index.py", "memory_search.py", "session_archive.py", "pr
                 "find-zombies.ps1"]
 HOOKS_ALIVE = "memory-kit: хуки работают"
 CODEX_RULES_MAX = 32 * 1024
+HANDOFF_MAX_CHARS = 5000                       # те же бюджеты, что в hooks/session-start-context.js
+HANDOFF_TIGHT_SHARE = 0.38
 
 TOOLS = {
     "claude": {"hooks_file": "settings.json", "rules": "CLAUDE.md"},
@@ -92,11 +94,18 @@ def main():
     agent_dir = os.path.abspath(os.path.expanduser(args.agent_dir)) if args.agent_dir else \
         os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     bad = 0
+    warned = 0
 
     def line(ok, text):
         nonlocal bad
         bad += 0 if ok else 1
         say("  [%s] %s" % ("ок" if ok else "НЕТ", text))
+
+    def warn(ok, text):
+        """Установка цела, но агент получит не всё: в итог «НЕТ» не идёт."""
+        nonlocal warned
+        warned += 0 if ok else 1
+        say("  [%s] %s" % ("ок" if ok else "!!", text))
 
     say("memory-kit: проверка %s" % agent_dir.replace("\\", "/"))
     cfg_path = os.path.join(agent_dir, "memory-kit.json")
@@ -187,7 +196,38 @@ def main():
                 total += os.path.getsize(path)
         line(total <= limit, "файлы правил влезают в потолок Codex: %d из %d байт" % (total, limit))
 
+    say("Что агент получит на старте:")
+    rules_text = ""
+    for path in (os.path.join(agent_dir, TOOLS[tool]["rules"]), os.path.join(root, TOOLS[tool]["rules"])):
+        if os.path.exists(path):
+            rules_text += read(path)
+    warn(HOOKS_ALIVE in rules_text, "в правилах агента есть проверка метки «%s»: без неё он не скажет, что хуки молчат"
+         % HOOKS_ALIVE)
+    warn("memory_search" in rules_text, "в правилах агента есть команда поиска по памяти")
+
+    tight = int(cfg.get("start_max_chars") or 0)
+    limit = round(tight * HANDOFF_TIGHT_SHARE) if tight else HANDOFF_MAX_CHARS
+    projects = [root] + [os.path.join(root, n) for n in sorted(os.listdir(root))] if os.path.isdir(root) else []
+    long_notes = []
+    for p in projects:
+        note = os.path.join(p, "HANDOFF.md")
+        if os.path.isfile(note):
+            size = len(read(note).strip())
+            if size > limit:
+                long_notes.append("%s: %d" % (os.path.basename(p), size))
+    warn(not long_notes, "записки HANDOFF влезают в старт (до %d знаков)%s" % (
+        limit, "; длиннее: " + ", ".join(long_notes[:5]) + (" и ещё %d" % (len(long_notes) - 5) if len(long_notes) > 5 else "")
+        + ". Конец такой записки агент видит, только если откроет файл" if long_notes else ""))
+
+    if cfg.get("journal_path"):
+        here = os.getcwd()
+        name = os.path.basename(here)
+        journal = os.path.join(here, os.path.expanduser(str(cfg["journal_path"]).replace("{project}", name)))
+        warn(os.path.isfile(journal), "свой журнал найден для папки %s: %s" % (name, journal.replace("\\", "/")))
+
     say()
+    if not bad and warned:
+        say("Предупреждений: %d. Установка цела, но разберись с ними: агент получит не всё." % warned)
     say("Всё на месте." if not bad else "Пунктов «НЕТ»: %d. Исправь их и запусти проверку ещё раз." % bad)
     return 1 if bad else 0
 

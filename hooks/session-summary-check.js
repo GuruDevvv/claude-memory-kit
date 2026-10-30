@@ -286,7 +286,10 @@ try {
     try { return fs.statSync(path.join(journals, f)).mtimeMs >= todayStart; } catch (e) { return false; }
   };
   let journalToday = true; // папки нет — не ворчим
-  if (fs.existsSync(journals)) {
+  const journalFile = kit.journalFile(cfg, projectPath);
+  if (cfg.journal_path && kit.isProject(cfg, projectPath)) {
+    try { journalToday = fs.statSync(journalFile).mtimeMs >= todayStart; } catch (e) { journalToday = false; }
+  } else if (fs.existsSync(journals)) {
     // В проекте смотрим его журнал: запись в чужой не значит, что этот сохранён.
     // Вне проекта (разовая папка) хватает записи в любом.
     journalToday = kit.isProject(cfg, projectPath)
@@ -301,7 +304,7 @@ try {
 
   const reasons = [];
   if (!journalToday) {
-    reasons.push('в журнал сегодня ничего не записано (' + path.join(journals, project + '.md') + ')');
+    reasons.push('в журнал сегодня ничего не записано (' + journalFile + ')');
   }
   if (handoffAge > HANDOFF_STALE_HOURS) {
     reasons.push('HANDOFF.md проекта ' + project + ' не обновлялся ' + handoffAge.toFixed(1) + ' ч');

@@ -86,6 +86,7 @@ Write `<agent folder>/memory-kit.json`. The hooks look for it next to the `hooks
 | `inject_project_index` | the same for project memory. Claude Code loads it on its own, so `false` there, `true` for Codex |
 | `sync_on_start` | at session start, pull new commits from the server in the folder the agent is opened in. Files are updated only if there are no unsaved edits and no merge is needed |
 | `journal_entries` | how many recent project journal entries to show at start |
+| `journal_path` | the person keeps the project journal somewhere else: its address, for example `docs/{project}-log.md`. `{project}` is the project name, a relative path starts at the project folder. Entries may be newest first or newest last. A journal at a custom address is not trimmed and search does not see it |
 | `journal_keep` | how many entries to keep in the journal; the rest move to `projects/archive/`. Default 5, `0` means never trim |
 | `start_max_chars` | a cap on the text the hook hands over at start. For Codex set `5800`: it passes no more than that to the model and cuts out the middle. You then get the project note, one journal entry, the "Всегда" ("Always") section and the address of the full index. Claude Code does not need this key |
 | `sessions_dir` | a custom location for the conversation archive, if it is not next to `central` |
@@ -180,6 +181,9 @@ session-start hook's reply, the index builder, search and the Codex rules cap. T
 "Всё на месте." ("All in place."). Any items marked "НЕТ" ("NO")? Fix them and run again. Retell the
 result to the person in your own words, and do not call the install done until the check passes.
 
+Lines marked "!!" are warnings: the install is intact, but the agent will not get everything at start (no
+hook-marker rule or search command in its rules, a HANDOFF too long for the start budget). Fix them or tell the person.
+
 The check prints its report in Russian; translate it for the person if needed.
 
 Then build the index and tell the person what comes next:
@@ -188,7 +192,9 @@ Then build the index and tell the person what comes next:
 python <agent folder>/scripts/memory_index.py <central>
 ```
 
-- open a new session in the project folder and ask "what's the state of the project?";
+- check each agent separately, in a new window opened in the project folder. Shared memory files do not prove
+  that an agent receives them. Ask: "Is the line `memory-kit: хуки работают` in your start context? Quote the
+  first line of the HANDOFF you received. Is the "Всегда" section there?" All three must be yes;
 - in Codex, approve the hooks with `/hooks`;
 - at the end of the work, say "stop".
 
