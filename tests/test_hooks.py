@@ -359,12 +359,14 @@ check("kit_check берёт папку набора из настроек", code
 ctx = start_hook(proj)
 check("файлы совпадают с набором: хук старта про расхождение молчит", "разошлась с набором" not in ctx, ctx[-300:])
 write(drift, keep_drift + "\n# правка мимо набора\n")
+newer = os.path.getmtime(os.path.join(KIT, "scripts", "memory_search.py")) + 86400
+os.utime(drift, (newer, newer))
 ctx = start_hook(proj)
 check("файл поправили на месте: хук старта называет его", "разошлась с набором" in ctx
       and "поправлены на месте" in ctx and "scripts/memory_search.py" in ctx, ctx[-400:])
 write(drift, keep_drift)
-old = time.time() - 86400
-os.utime(drift, (old, old))
+# Отставание считаем от исходника, который сам может быть старше суток.
+old = os.path.getmtime(os.path.join(KIT, "hooks", "memory-recall-hook.py")) - 86400
 stale = os.path.join(home, ".claude", "hooks", "memory-recall-hook.py")
 write(stale, "# старая версия\n")
 os.utime(stale, (old, old))
