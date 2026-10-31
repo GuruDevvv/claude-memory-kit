@@ -36,6 +36,8 @@ STOP = [
     "git commit -a -m 'правка'",
     "git status\ngit add .\ngit commit -m x",
     "git add . && git push",
+    "$t = @'\nтекст\n'@\ngit add -A",
+    "git add -A\n$t = @'\nit's\n'@",
 ]
 PASS = [
     "git add README.md",
@@ -56,6 +58,8 @@ PASS = [
     "git add -- a.py && git commit -m x && grep -r слово . | wc -l",
     "git add a.py; ls .",
     "git commit -m x && python run.py --agent-dir here -a",
+    "$t = @'\nit's\ngit add -A\n'@\nWrite-Output $t",
+    "$t = @\"\nit's\ngit add .\n\"@\nWrite-Output $t",
 ]
 for c in STOP:
     check("останавливает: " + c.replace("\n", " ⏎ "), bash(c) == "git_add_all")

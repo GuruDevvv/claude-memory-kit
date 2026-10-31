@@ -140,6 +140,7 @@ def note(data, cfg, event, **fields):
 def strip_quoted(command):
     """Команда без содержимого кавычек и встроенных текстов: запрет не должен ловить слова из сообщения коммита."""
     command = re.sub(r"<<-?\s*['\"]?(\w+)['\"]?.*?^\s*\1\s*$", " ", command, flags=re.S | re.M)
+    command = re.sub(r"@(['\"])[^\S\n]*\r?\n.*?^\1@", '""', command, flags=re.S | re.M)  # текстовый блок PowerShell: апостроф внутри ломал кавычки ниже
     return re.sub(r"\"(?:\\.|[^\"\\])*\"|'[^']*'", '""', command)
 
 
