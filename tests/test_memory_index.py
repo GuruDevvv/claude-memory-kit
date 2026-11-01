@@ -189,5 +189,17 @@ os.utime(lock, (t, t))
 code, msg = mi.build(mem)
 check("старый брошенный замок снимается", code == 0 and os.path.exists(os.path.join(mem, "MEMORY.md")), msg)
 
+# правило из feedback/archive не действует: ни в оглавлении, ни в каталоге, ни в счёте
+mem = sandbox()
+rule(mem, "живое", "Живое правило")
+rule(mem, "ушло", "Правило из архива")
+os.makedirs(os.path.join(mem, "feedback", "archive"))
+os.replace(os.path.join(mem, "feedback", "ушло.md"), os.path.join(mem, "feedback", "archive", "ушло.md"))
+code, msg = mi.build(mem)
+built = "".join(io.open(os.path.join(mem, f), encoding="utf-8").read() for f in ("MEMORY.md", "INDEX.md")
+                if os.path.exists(os.path.join(mem, f)))
+check("feedback/archive не попадает в оглавление и каталог", code == 0 and "Живое правило" in built
+      and "Правило из архива" not in built, built[:300])
+
 print(f"\nитого: {sum(results)} из {len(results)}")
 sys.exit(0 if all(results) else 1)

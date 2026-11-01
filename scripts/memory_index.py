@@ -84,7 +84,8 @@ def rule_files(mem):
         if rel_root != "." and top in SKIP_DIRS:
             dirs[:] = []
             continue
-        dirs[:] = [d for d in dirs if not d.startswith(".")]
+        # archive на любой глубине: правило из feedback/archive не действует, как и в поиске
+        dirs[:] = [d for d in dirs if not d.startswith(".") and d != "archive"]
         for f in files:
             if f.endswith(".md") and f not in SKIP_FILES and not f.startswith("_"):
                 out.append(os.path.relpath(os.path.join(root, f), mem).replace(os.sep, "/"))
