@@ -37,6 +37,30 @@ function textOf(entry) {
   return raw.replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, '').trim();
 }
 
+/** Служебные вставки Codex идут с ролью user рядом со словами человека. */
+const CODEX_SERVICE_RE = /^\s*(?:<[a-z_][\w-]*[\s>]|# AGENTS\.md instructions|>>> )/;
+
+/**
+ * Строка записи Codex в привычный вид записи Claude Code, остальное — null.
+ * Команды и вызовы инструментов лежат строкой: для поиска `git commit` и `cd X` этого достаточно.
+ */
+function fromCodex(e) {
+  const p = e && e.type === 'response_item' && e.payload;
+  if (!p) return null;
+  const base = { timestamp: e.timestamp };
+  if (p.type === 'message' && (p.role === 'user' || p.role === 'assistant') && Array.isArray(p.content)) {
+    const parts = p.content.map(c => (c && c.text) || '');
+    const text = (p.role === 'user' ? parts.filter(t => !CODEX_SERVICE_RE.test(t)) : parts).join('\n').trim();
+    if (!text) return null;
+    return Object.assign(base, { type: p.role, message: { content: [{ type: 'text', text }] } });
+  }
+  if (p.type === 'function_call' || p.type === 'custom_tool_call') {
+    const command = String(p.arguments || p.input || '');
+    return Object.assign(base, { type: 'assistant', message: { content: [{ type: 'tool_use', name: p.name, input: { command } }] } });
+  }
+  return null;
+}
+
 /** Хвост записи сессии: сообщения человека и агента по порядку. Не читается — пусто. */
 function readEntries(input) {
   if (!input.transcript_path) return [];
@@ -54,7 +78,8 @@ function readEntries(input) {
   const entries = [];
   for (const line of tail.split('\n')) {
     try {
-      const e = JSON.parse(line);
+      const raw = JSON.parse(line);
+      const e = fromCodex(raw) || raw;
       if ((e.type === 'user' || e.type === 'assistant') && !e.isSidechain && !e.isMeta) entries.push(e);
     } catch (e) { /* обрезанная первая строка хвоста */ }
   }
@@ -153,6 +178,10 @@ function otherCommitRepos(entries, since, skip) {
       if (typeof cmd === 'string' && /git\b[^\n]*\bcommit\b/.test(cmd)) {
         for (const m of cmd.matchAll(/(?:\bcd|\bgit\s+-C)\s+("([^"]+)"|'([^']+)'|([^\s;&|]+))/g)) {
           dirs.add(shellPath(m[2] || m[3] || m[4]));
+        }
+        // Codex: рабочая папка команды — отдельным полем
+        for (const m of cmd.matchAll(/\bworkdir\\?["']?\s*:\s*\\?["']([^"'\n]+?)\\?["']/g)) {
+          dirs.add(m[1].replace(/\\\\/g, '\\'));
         }
       }
     }

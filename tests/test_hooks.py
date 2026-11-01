@@ -230,6 +230,18 @@ check("второй раз подряд не держит", not ritual([U("ст�
 check("служебная вставка в сообщении человека не мешает",
       ritual([U("стоп\n<system-reminder>что-то служебное</system-reminder>"), A("Готово.")]))
 
+# запись сессии Codex: сообщения лежат в response_item, а служебные вставки идут с ролью user
+CX = lambda role, text: {"type": "response_item", "payload": {"type": "message", "role": role, "content": [
+    {"type": "input_text" if role == "user" else "output_text", "text": text}]}}
+CXU, CXA = (lambda t: CX("user", t)), (lambda t: CX("assistant", t))
+AGENTS = "# AGENTS.md instructions\n\n<INSTRUCTIONS>стоп</INSTRUCTIONS>"
+ENVCTX = "<environment_context><current_date>2026-11-01</current_date></environment_context>"
+check("Codex: «стоп» без «Промпта» держит", ritual([CXU(AGENTS), CXU(ENVCTX), CXU("стоп"), CXA("Готово.")]))
+check("Codex: «стоп» с «Промптом» пропускает", not ritual([CXU("стоп"), CXA("Итог\n\n## Промпт\n> дальше")]))
+check("Codex: обычная просьба не держит", not ritual([CXU("стоп"), CXA("Готово."), CXU("сделай кнопку"), CXA("сделал")]))
+check("Codex: служебная вставка после «стоп» не мешает", ritual([CXU("стоп"), CXU(ENVCTX), CXA("Готово.")]))
+check("Codex: служебная вставка сама концом сессии не считается", not ritual([CXU("сделай"), CXA("да"), CXU(AGENTS)]))
+
 # после «стоп» в репозитории текущего проекта не должно остаться незакоммиченного и незапушенного
 def g(cwd, *args):
     return subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", "-c", "init.defaultBranch=master"]
