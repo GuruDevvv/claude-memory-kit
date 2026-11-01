@@ -247,7 +247,14 @@ try {
       if (seen.some(s => kit.samePath(s, file)) || !fs.existsSync(file)) return;
       seen.push(file);
       const text = fs.readFileSync(file, 'utf-8').trim();
-      if (text && tight) {
+      // index_in_rules: общее оглавление уже лежит в файле правил агента, адрес и повтор не нужны,
+      // а освободившееся место идёт на оглавление проекта.
+      if (text && tight && cfg.index_in_rules) {
+        if (seen.length > 1) {
+          parts.push('### ' + title + '\n\n' + clip(text, ALWAYS_MAX, 'оглавление обрезано, полностью: ' +
+            file.replace(/\\/g, '/')) + '\n');
+        }
+      } else if (text && tight) {
         const always = seen.length === 1 ? section(text, 'Всегда') : '';
         parts.push('### ' + title + '\n\n' + (always ? clip(always, ALWAYS_MAX, 'раздел обрезан') + '\n\n' : '') +
           'Оглавление целиком сюда не поместилось (' + text.length + ' знаков). Прочитай его до начала работы: ' +

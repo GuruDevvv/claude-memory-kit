@@ -295,6 +295,14 @@ check("Codex: старт укладывается в потолок и несё�
       len(ctx) <= 5900 and "записка магазина" in ctx and "говорить просто" in ctx
       and "Прочитай его до начала работы" in ctx and "MEMORY.md" in ctx and "номер такой-то" not in ctx,
       "%d %s" % (len(ctx), ctx[-300:]))
+codex_cfg_file = os.path.join(home, ".codex", "memory-kit.json")
+codex_cfg_keep = io.open(codex_cfg_file, encoding="utf-8").read()
+write(codex_cfg_file, json.dumps(dict(json.loads(codex_cfg_keep), index_in_rules=True), ensure_ascii=False))
+ctx = start_hook(proj, ".codex")
+check("Codex, оглавление в правилах: нет ни адреса, ни повтора, записка на месте",
+      len(ctx) <= 5900 and "записка магазина" in ctx and "Прочитай его до начала работы" not in ctx
+      and "говорить просто" not in ctx and "номер такой-то" not in ctx, "%d %s" % (len(ctx), ctx[-300:]))
+write(codex_cfg_file, codex_cfg_keep)
 ctx = start_hook(proj)
 check("Claude: старт без потолка, оглавление целиком", "номер такой-то" in ctx and len(ctx) > 10000, len(ctx))
 
