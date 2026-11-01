@@ -171,6 +171,24 @@ check("журнал: в записи есть проект и файлы пра�
       and "push origin" not in json.dumps(events), str(events[:2]))
 check("журнал: повтор темы в той же сессии не пишется", kinds.count(("recall", "commit")) == 2, str(kinds))
 
+# условие when в шапке правила: показывать, только если команда про это
+write(os.path.join(central, "feedback", "feedback_when.md"), "---\nname: w\nmetadata:\n  type: feedback\n"
+      "  status: правило\n  seen: 5\n  when: \"vercel|netlify\"\n  index_line: \"Страницы только на свой сервер\"\n"
+      "  moment: Когда коммичу\n---\n\nтело\n")
+ctx = recall("pre", {"session_id": sid + "w1", "cwd": proj, "tool_input": {"command": "git commit -m x"}})
+check("правило с условием when молчит, когда команда не про него", "без add -A" in ctx and "свой сервер" not in ctx, ctx[:300])
+ctx = recall("pre", {"session_id": sid + "w2", "cwd": proj, "tool_input": {"command": "git commit -m vercel"}})
+check("правило с условием when приходит, когда команда про него", "свой сервер" in ctx, ctx[:300])
+ctx = recall("pre", {"session_id": sid + "w4", "cwd": proj, "tool_input": {"command": "npx vercel deploy --prod"}})
+check("выкладка на чужую площадку остановлена, правило о публикации причиной", ctx.startswith("ОТКАЗ") and "свой сервер" in ctx, ctx[:300])
+check("слово vercel в пути подсказку не вызывает", recall("pre", {"session_id": sid + "w5", "cwd": proj,
+      "tool_input": {"command": "ls docs/vercel-notes"}}) == "")
+write(os.path.join(central, "feedback", "feedback_when.md"), "---\nname: w\nmetadata:\n  type: feedback\n"
+      "  status: правило\n  when: \"(\"\n  index_line: \"Сломанное условие\"\n  moment: Когда коммичу\n---\n\nтело\n")
+ctx = recall("pre", {"session_id": sid + "w3", "cwd": proj, "tool_input": {"command": "git commit -m x"}})
+check("сломанное условие when не роняет подсказку", "без add -A" in ctx, ctx[:300])
+os.remove(os.path.join(central, "feedback", "feedback_when.md"))
+
 # журнал не растёт без конца: старые части удаляются
 import importlib.util
 spec = importlib.util.spec_from_file_location("ms_inst", os.path.join(home, ".claude", "scripts", "memory_search.py"))

@@ -61,8 +61,10 @@ GROUPS = [
                r"пада[ею]т|упал|вылета|крашит|не\s+видит|ошибк[аиу]\s+при",
      "query": "завис не открывается падает обход грабли"},
     {"key": "commit", "title": "коммит и публикация",
-     "pattern": r"\bgit\s+(?:-[Cc]\s+\S+\s+)*(?:commit|push|add|merge|rebase|reset|tag)\b|\bgh\s+(?:pr|release)\s+(?:create|merge)",
-     "block": r"\bgit\s+(?:-[Cc]\s+\S+\s+)*push\b|\bgh\s+(?:pr|release)\s+(?:create|merge)",
+     "pattern": r"\bgit\s+(?:-[Cc]\s+\S+\s+)*(?:commit|push|add|merge|rebase|reset|tag)\b|\bgh\s+(?:pr|release)\s+(?:create|merge)"
+                r"|(?:^|[\s;&|(])(?:vercel|netlify|wrangler|surge)\s+\S",
+     "block": r"\bgit\s+(?:-[Cc]\s+\S+\s+)*push\b|\bgh\s+(?:pr|release)\s+(?:create|merge)"
+              r"|(?:^|[\s;&|(])(?:vercel|netlify|wrangler|surge)\s+\S",
      "moments": ["коммич", "публик", "git"], "query": "git коммит пуш публикация add"},
     {"key": "server", "title": "сервер и выкатка",
      # docker здесь нет: местный контейнер — не сервер, а на сервере он идёт внутри ssh (ложная остановка 13.10.2026)
@@ -202,6 +204,13 @@ def pick(ms, group, command, dirs):
             by_moment = any(s in ms.norm(m.get("moment", "")) for s in stems)
             if not by_moment and (mem, rel) not in found:
                 continue
+            # when в шапке правила: показывать, только если команда или просьба про это. Без него
+            # правило про публикацию приходило в каждой сессии с коммитом (замер 01.11.2026: 504 показа)
+            try:
+                if m.get("when") and not re.search(m["when"], command, re.I):
+                    continue
+            except re.error:
+                pass                          # сломанное условие не должно прятать правило
             status, seen = (m.get("status") or "").lower(), int_of(m.get("seen"))
             body = ms.norm(title + "\n" + text)
             weight = (2 if by_moment else 0) + (1 if status != "проба" else 0) + (2 if status != "проба" and seen >= 2 else 0)
