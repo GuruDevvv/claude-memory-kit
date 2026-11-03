@@ -247,6 +247,103 @@ function gitLeftovers(repo) {
   return out;
 }
 
+const ARCH_SCRIPT = path.join(__dirname, '..', 'scripts', 'arch_drift.py');
+const ARCH_MARK = '<!-- arch:begin -->';
+
+/** Репозитории, которых касалась сессия: проект и папки правленых файлов и команд с git. */
+function sessionRepos(cfg, entries) {
+  const dirs = new Set([kit.projectDir(cfg, process.cwd())]);
+  for (const e of entries) {
+    if (e.type !== 'assistant' || !Array.isArray(e.message && e.message.content)) continue;
+    for (const c of e.message.content) {
+      if (!c || c.type !== 'tool_use' || !c.input) continue;
+      const f = c.input.file_path || c.input.notebook_path;
+      if (typeof f === 'string' && path.isAbsolute(f)) dirs.add(path.dirname(f));
+      const cmd = c.input.command;
+      if (typeof cmd === 'string' && /\bgit\b/.test(cmd)) {
+        for (const m of cmd.matchAll(/(?:\bcd|\bgit\s+-C)\s+("([^"]+)"|'([^']+)'|([^\s;&|]+))/g)) {
+          dirs.add(shellPath(m[2] || m[3] || m[4]));
+        }
+      }
+    }
+  }
+  const repos = new Map();
+  for (const d of dirs) {
+    if (repos.size >= MAX_REPOS) break;
+    try {
+      if (!path.isAbsolute(d) || !fs.existsSync(d)) continue;
+      const top = path.resolve(git(d, ['rev-parse', '--show-toplevel']));
+      repos.set(top.toLowerCase(), top);
+    } catch (e) { /* не репозиторий */ }
+  }
+  return [...repos.values()];
+}
+
+const ARCH_LABEL = { dir: { A: 'новая часть', D: 'исчезла часть' }, infra: 'изменён файл запуска', agents: '' };
+
+/**
+ * Карта устройства (стандарт _lab/architecture-standard) отстала от кода в этой сессии:
+ * появилась или исчезла папка с кодом, тронут файл запуска, AGENTS.md разошёлся с CLAUDE.md.
+ * Только репозитории с меткой карты в CLAUDE.md; один раз за сессию. Сбой проверки не молчит.
+ * Возвращает { reason } для остановки, { notice } для строки-предупреждения или null.
+ */
+function archCheck(cfg, input, entries) {
+  if (input.stop_hook_active || !guardOn(cfg, 'arch_map')) return null;
+  const sid = String(input.session_id || '').replace(/[^\w-]/g, '').slice(0, 40);
+  const flag = sid ? path.join(os.tmpdir(), 'memory-kit-arch-' + sid) : '';
+  if (flag && fs.existsSync(flag)) return null;
+  const repos = sessionRepos(cfg, entries).filter(r => {
+    try { return fs.readFileSync(path.join(r, 'CLAUDE.md'), 'utf-8').includes(ARCH_MARK); } catch (e) { return false; }
+  });
+  if (!repos.length) return null;
+  const since = sessionStart(input, entries);
+  const pythons = [cfg.python, 'python', 'python3', 'py'].filter(Boolean);
+  const lines = [], errors = [];
+  for (const repo of repos) {
+    let out = null, err = 'Python не найден';
+    for (const py of pythons) {
+      try {
+        out = cp.execFileSync(py, ['-I', ARCH_SCRIPT, '--hook', '--since', since, repo], {
+          timeout: 15000, stdio: ['ignore', 'pipe', 'pipe'], encoding: 'utf-8', windowsHide: true,
+          env: Object.assign({}, process.env, { PYTHONIOENCODING: 'utf-8' }),
+        });
+        break;
+      } catch (e) { if (e.code !== 'ENOENT') { err = String(e.message || e).split('\n')[0]; break; } }
+    }
+    const name = path.basename(repo);
+    let res = null;
+    try { res = JSON.parse(out); } catch (e) { res = null; }
+    if (!res || typeof res !== 'object') { errors.push(name + ': ' + err); continue; }
+    if (res.error) { errors.push(name + ': ' + res.error); continue; }
+    for (const ev of res.events || []) {
+      const label = ev.kind === 'dir' ? ARCH_LABEL.dir[ev.st] || 'изменена часть' : ARCH_LABEL[ev.kind];
+      lines.push(name + ': ' + (label ? label + ' `' + ev.path + '`' : ev.path));
+    }
+  }
+  if (!lines.length && !errors.length) return null;
+  if (flag) { try { fs.writeFileSync(flag, '1'); } catch (e) { /* без отметки спросим ещё раз */ } }
+  try { // отметки прошлых сессий старше недели
+    for (const f of fs.readdirSync(os.tmpdir())) {
+      if (!f.startsWith('memory-kit-arch-')) continue;
+      const p = path.join(os.tmpdir(), f);
+      if (Date.now() - fs.statSync(p).mtimeMs > 7 * 86400000) fs.unlinkSync(p);
+    }
+  } catch (e) { /* уборка не критична */ }
+  const session = sid.slice(0, 8);
+  if (!lines.length) {
+    logEvent(cfg, { event: 'guard', key: 'arch_map', blocked: false, error: true, session });
+    return { notice: 'Проверка карты устройства не сработала: ' + errors.join('; ') };
+  }
+  logEvent(cfg, { event: 'guard', key: 'arch_map', blocked: true, session, count: lines.length });
+  return {
+    reason: 'В этой сессии поменялось устройство проекта, а карта «Как устроено» не тронута:\n- ' +
+      lines.join('\n- ') + '\nОбнови карту в CLAUDE.md (между метками arch:begin/arch:end) и docs/architecture.md, ' +
+      'если он есть; если AGENTS.md написан отдельно — тот же блок туда дословно. Закоммить вместе с кодом. ' +
+      'Если устройство на деле не поменялось (разовый скрипт, смена версии), обнови дату «сверено» в карте ' +
+      'и скажи об этом одной строкой. Второй раз за сессию не остановлю.',
+  };
+}
+
 function logEvent(cfg, row) {
   try {
     if (cfg.metrics === false || !cfg.central) return;
@@ -263,6 +360,8 @@ try {
 
   const input = readStdin();
   const entries = readEntries(input);
+  let arch = null;
+  try { arch = archCheck(cfg, input, entries); } catch (e) { arch = null; }
   const last = stopIndex(input, entries, cfg);
   if (last >= 0) {
     const session = String(input.session_id || '').slice(0, 8);
@@ -291,10 +390,19 @@ try {
           'Незакоммиченное там не трогай. Чужие коммиты не пушь, назови в отчёте.');
       }
     }
+    if (arch && arch.reason) reasons.push(arch.reason);
     if (reasons.length) {
       console.log(JSON.stringify({ decision: 'block', reason: reasons.join('\n\n') }));
       process.exit(0);
     }
+  }
+  if (arch && arch.reason) {
+    console.log(JSON.stringify({ decision: 'block', reason: arch.reason }));
+    process.exit(0);
+  }
+  if (arch && arch.notice) {
+    console.log(JSON.stringify({ systemMessage: arch.notice }));
+    process.exit(0);
   }
 
   const today = new Date().toISOString().slice(0, 10);

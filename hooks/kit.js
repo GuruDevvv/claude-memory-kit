@@ -98,7 +98,7 @@ const KIT_FILES = {
   hooks: ['kit.js', 'session-start-context.js', 'session-summary-check.js', 'memory-index-hook.py',
     'memory-recall-hook.py'],
   scripts: ['memory_index.py', 'memory_search.py', 'session_archive.py', 'project_index.py', 'kit_check.py',
-    'memory_report.py', 'memory_upkeep.py',
+    'memory_report.py', 'memory_upkeep.py', 'arch_drift.py',
     'find-zombies.ps1'],
 };
 

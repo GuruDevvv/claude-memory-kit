@@ -56,7 +56,7 @@ Copy from the kit folder into the agent folder. With two agents, repeat for each
 | From | To | Files |
 |---|---|---|
 | `hooks/` | `<agent folder>/hooks/` | `kit.js`, `session-start-context.js`, `session-summary-check.js`, `memory-index-hook.py`, `memory-recall-hook.py` |
-| `scripts/` | `<agent folder>/scripts/` | `memory_index.py`, `memory_search.py`, `session_archive.py`, `project_index.py`, `kit_check.py`, `memory_report.py`, `memory_upkeep.py`, `find-zombies.ps1` |
+| `scripts/` | `<agent folder>/scripts/` | `memory_index.py`, `memory_search.py`, `session_archive.py`, `project_index.py`, `kit_check.py`, `memory_report.py`, `memory_upkeep.py`, `arch_drift.py`, `find-zombies.ps1` |
 
 A file with the same name is already there and differs? That is the person's own version. Save a copy,
 compare it with the kit's file and list what it has beyond the kit. Show each difference to the person:
