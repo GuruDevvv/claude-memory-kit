@@ -93,6 +93,16 @@ r = make("u6")
 write(os.path.join(r, "server", "app.py"), "x")
 check("скрипт: незакоммиченная новая часть тоже видна", [e["path"] for e in arch_drift.drift(r)["events"]] == ["server/"])
 
+r = make("u8")
+write(os.path.join(r, "общее", "scripts", "сборка.py"), "x")
+write(os.path.join(r, "CLAUDE.md"), MAP.replace("- `bot/` — бот", "- `bot/` — бот\n- `общее/scripts/` — сборщики"))
+commit(r)
+check("скрипт: папка с кириллицей, описанная в карте, — чисто", arch_drift.drift(r)["events"] == [],
+      str(arch_drift.drift(r)["events"]))
+write(os.path.join(r, "ещё", "новое.py"), "x")
+check("скрипт: новая папка с кириллицей — отставание",
+      [e["path"] for e in arch_drift.drift(r)["events"]] == ["ещё/"], str(arch_drift.drift(r)["events"]))
+
 r = make("u7")
 write(os.path.join(r, "AGENTS.md"), "# для Codex\n")
 commit(r)

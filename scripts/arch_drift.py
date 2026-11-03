@@ -39,7 +39,10 @@ MAP_RE = re.compile(r'<!-- arch:begin -->(.*?)<!-- arch:end -->', re.S)
 
 
 def run(repo, *args, check=True):
-    r = subprocess.run(['git', '-C', repo, *args], capture_output=True, text=True, encoding='utf-8',
+    # core.quotepath=off: иначе ls-tree и log пишут кириллицу экранированной («\320\220…»),
+    # а ls-files -z — как есть, и одна и та же папка выглядит двумя разными
+    r = subprocess.run(['git', '-c', 'core.quotepath=off', '-C', repo, *args], capture_output=True, text=True,
+                       encoding='utf-8',
                        errors='replace', stdin=subprocess.DEVNULL)
     if check and r.returncode != 0:
         raise RuntimeError(r.stderr.strip() or 'git failed')
