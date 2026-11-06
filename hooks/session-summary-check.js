@@ -7,6 +7,7 @@
  * После «стоп» один раз держит конец хода, если нет раздела «Промпт» или в репозитории текущего
  * проекта остались правки без коммита и незапушенные ветки, или в другом репозитории лежат
  * незапушенные коммиты, которые сессия сделала сама.
+ * В любом ходе держит конец хода, если агент правил HANDOFF.md и тот длиннее 5 000 знаков.
  * На коротком разговоре молчит — длину сессии оценивает по размеру её записи.
  */
 const fs = require('fs');
@@ -344,6 +345,46 @@ function archCheck(cfg, input, entries) {
   };
 }
 
+const HANDOFF_MAX_CHARS = 5000; // столько записки показывает хук начала сессии (session-start-context.js)
+
+/**
+ * В этом ходе агент правил записку HANDOFF.md, а она длиннее того, что увидит следующая сессия.
+ * Правку ищем по вызовам инструментов после последнего сообщения человека: Edit/Write с путём к
+ * HANDOFF.md — этот файл; команда оболочки или правка Codex со словом HANDOFF.md — записка проекта.
+ * Возвращает текст причины для остановки или null.
+ */
+function handoffSizeCheck(cfg, input, entries) {
+  if (input.stop_hook_active || !guardOn(cfg, 'handoff_size')) return null;
+  let start = -1;
+  for (let i = entries.length - 1; i >= 0; i--) {
+    if (entries[i].type === 'user' && textOf(entries[i])) { start = i; break; }
+  }
+  const files = new Set();
+  const projectHandoff = path.join(kit.projectDir(cfg, process.cwd()), 'HANDOFF.md');
+  for (const e of entries.slice(start + 1)) {
+    const c = e.type === 'assistant' && e.message && Array.isArray(e.message.content) ? e.message.content : [];
+    for (const part of c) {
+      if (!part || part.type !== 'tool_use' || !part.input) continue;
+      const fp = part.input.file_path || part.input.notebook_path;
+      if (fp && path.basename(String(fp)) === 'HANDOFF.md') files.add(path.resolve(String(fp)));
+      else if (!fp && /HANDOFF\.md/.test(String(part.input.command || ''))) files.add(projectHandoff);
+    }
+  }
+  const max = Number(cfg.handoff_max) || HANDOFF_MAX_CHARS;
+  const over = [];
+  for (const f of files) {
+    let len = 0;
+    try { len = fs.readFileSync(f, 'utf-8').length; } catch (e) { continue; }
+    if (len > max) over.push(f.replace(/\\/g, '/') + ' — ' + len + ' знаков');
+  }
+  if (!over.length) return null;
+  logEvent(cfg, { event: 'guard', key: 'handoff_size', blocked: true, session: String(input.session_id || '').slice(0, 8) });
+  return 'Записка длиннее ' + max + ' знаков, следующая сессия увидит только начало:\n- ' + over.join('\n- ') +
+    '\nОставь в записке только открытое: закрытые задачи убери, сверив, что они есть в журнале проекта ' +
+    '(нет — допиши туда); подробности (хэши, суммы, кому что отправлено) — в журнал или документ задачи. ' +
+    '«Следующий шаг» и «Промпт» держи наверху.';
+}
+
 function logEvent(cfg, row) {
   try {
     if (cfg.metrics === false || !cfg.central) return;
@@ -362,6 +403,8 @@ try {
   const entries = readEntries(input);
   let arch = null;
   try { arch = archCheck(cfg, input, entries); } catch (e) { arch = null; }
+  let handoff = null;
+  try { handoff = handoffSizeCheck(cfg, input, entries); } catch (e) { handoff = null; }
   const last = stopIndex(input, entries, cfg);
   if (last >= 0) {
     const session = String(input.session_id || '').slice(0, 8);
@@ -391,13 +434,15 @@ try {
       }
     }
     if (arch && arch.reason) reasons.push(arch.reason);
+    if (handoff) reasons.push(handoff);
     if (reasons.length) {
       console.log(JSON.stringify({ decision: 'block', reason: reasons.join('\n\n') }));
       process.exit(0);
     }
   }
-  if (arch && arch.reason) {
-    console.log(JSON.stringify({ decision: 'block', reason: arch.reason }));
+  if ((arch && arch.reason) || handoff) {
+    const why = [arch && arch.reason, handoff].filter(Boolean).join('\n\n');
+    console.log(JSON.stringify({ decision: 'block', reason: why }));
     process.exit(0);
   }
   if (arch && arch.notice) {

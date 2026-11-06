@@ -590,5 +590,23 @@ check("первая сборка: текст правила цел", "тело �
 r = install3()
 check("повторная установка: новой копии нет", len([d for d in os.listdir(os.path.dirname(mem3)) if d.startswith("memory.bak-")]) == 1)
 
+# записка длиннее того, что покажет хук начала сессии
+shop_handoff = os.path.join(proj, "HANDOFF.md")
+shop_keep = io.open(shop_handoff, encoding="utf-8").read()
+TU = lambda name, inp: {"type": "assistant", "message": {"role": "assistant", "content": [
+    {"type": "tool_use", "name": name, "input": inp}]}}
+EDIT_H = TU("Edit", {"file_path": shop_handoff})
+write(shop_handoff, "# HANDOFF — Shop\n" + "длинная строка записки\n" * 300)
+check("записка: правил в этом ходе и она длиннее 5 000 — держит", ritual([U("обнови записку"), EDIT_H, A("готово")]))
+check("записка: правка через команду оболочки — тоже держит",
+      ritual([U("обнови"), TU("Bash", {"command": "sed -i s/a/b/ HANDOFF.md"}), A("готово")]))
+check("записка: правили в прошлом ходе — не держит", not ritual([U("обнови"), EDIT_H, A("готово"), U("дальше"), A("ок")]))
+check("записка: второй раз подряд не держит", not ritual([U("обнови"), EDIT_H, A("готово")], stop_hook_active=True))
+check("записка: при «стоп» причина в общем списке",
+      ritual([U("стоп"), EDIT_H, A("Итог\n\n## Промпт\n> дальше")]))
+write(shop_handoff, "# HANDOFF — Shop\nкороткая записка\n")
+check("записка: короткая — не держит", not ritual([U("обнови записку"), EDIT_H, A("готово")]))
+write(shop_handoff, shop_keep)
+
 print(f"\nитого: {sum(results)} из {len(results)}")
 sys.exit(0 if all(results) else 1)
