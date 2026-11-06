@@ -93,6 +93,7 @@ Write `<agent folder>/memory-kit.json`. The hooks look for it next to the `hooks
 | `start_max_chars` | a cap on the text the hook hands over at start. For Codex set `5800`: it passes no more than that to the model and cuts out the middle. You then get the project note, one journal entry, the "Всегда" ("Always") section and the address of the full index. Claude Code does not need this key |
 | `index_in_rules` | `true` when something outside the kit already appends the full central index to the agent's rules file, as a local copy script can do for Codex. With `start_max_chars` set, the hook then drops the "Всегда" section and the index address, and shows the project index instead. Raise `project_doc_max_bytes` first so the rules file is read to its end. Off by default |
 | `sessions_dir` | a custom location for the conversation archive, if it is not next to `central` |
+| `index_budget` | your own cap on the memory table of contents for a project folder: `{"E--Projects-Big": 10000}` (folder name in `projects_dir` → characters). Lower than the general 23 500 only; what does not fit goes to `INDEX.md` as usual. For a big project whose map lives in its rules file |
 | `project_index` | `false`: do not build the project list `PROJECT_INDEX.md` at the end of a turn. Useful if another tool already maintains it |
 | `recall_block` | `false` turns off the pause before the first push and the first server command |
 | `recall` | your own topics and triggers for rule hints; format at the top of `hooks/memory-recall-hook.py` |

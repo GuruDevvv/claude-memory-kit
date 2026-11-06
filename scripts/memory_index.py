@@ -64,6 +64,27 @@ def _places():
 
 
 PROJECTS_ROOT, CENTRAL = _places()
+
+
+def _index_budgets():
+    """Свои потолки оглавления: ключ index_budget в memory-kit.json — {имя папки проекта: знаков}."""
+    cfg = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "memory-kit.json")
+    try:
+        with open(cfg, encoding="utf-8") as fh:
+            return {str(k): int(v) for k, v in (json.load(fh).get("index_budget") or {}).items()}
+    except Exception:
+        return {}
+
+
+INDEX_BUDGET = _index_budgets()
+
+
+def budget_for(mem):
+    """Потолок оглавления этой папки памяти: свой из index_budget, но не выше общего BUDGET_CHARS.
+    Зачем: оглавление читается в каждой сессии целиком, а большому проекту хватает карты
+    в CLAUDE.md и поиска по памяти; остальное уходит в INDEX.md, как и раньше (решение 2026-11-06)."""
+    own = INDEX_BUDGET.get(os.path.basename(os.path.dirname(os.path.abspath(mem))))
+    return min(own, BUDGET_CHARS) if own else BUDGET_CHARS
 MARK = "<!-- СОБРАНО memory_index.py — руками не править. Новое правило = отдельный файл; строка для оглавления — в его metadata.index_line и metadata.moment. -->"
 LINK_RE = re.compile(r"\]\(([^)\s]+\.md)\)")
 HEAD_END = "<!-- КОНЕЦ ШАПКИ: ниже собранные строки -->"
@@ -475,11 +496,12 @@ def _build(mem, dry, quiet):
     for i, e in enumerate(entries):
         pos.setdefault(e["files"][0], i)
     chosen, left = [], []
+    limit = budget_for(mem)
     for c in ranked(cands, pos):
         add_b = len(c["line"] + "\n") + (0 if any(x["moment"] == c["moment"] for x in chosen)
                                           else len(f"\n## {c['moment']}\n\n"))
         add_l = 1 if any(x["moment"] == c["moment"] for x in chosen) else 4
-        if used_b + add_b <= BUDGET_CHARS and used_l + add_l <= BUDGET_LINES:
+        if used_b + add_b <= limit and used_l + add_l <= BUDGET_LINES:
             chosen.append(c)
             used_b += add_b
             used_l += add_l

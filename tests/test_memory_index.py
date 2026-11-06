@@ -129,6 +129,21 @@ mi.BUDGET_CHARS = budget
 np_, nn = memory(mem).count("проверенное"), memory(mem).count("новое")
 check(f"в тесном оглавлении есть и проверенные ({np_}), и новые ({nn})", np_ >= 8 and nn >= 8 and abs(np_ - nn) <= 1)
 
+# 5г. свой потолок папки (index_budget): оглавление короче общего, остальное в каталоге
+mem = sandbox()
+for i in range(30):
+    rule(mem, f"feedback_b{i:02d}", f"[Б{i}](feedback/feedback_b{i:02d}.md) — правило {i} " + "х" * 60)
+keep = dict(mi.INDEX_BUDGET)
+mi.INDEX_BUDGET[os.path.basename(os.path.dirname(mem))] = 1500
+code, _ = mi.build(mem)
+small = len(memory(mem))
+cat = io.open(os.path.join(mem, "INDEX.md"), encoding="utf-8").read()
+check(f"свой потолок 1500: оглавление {small} знаков, остальное в INDEX.md",
+      code == 0 and small <= 1500 and memory(mem).count("правило") + cat.count("правило") >= 30)
+mi.INDEX_BUDGET[os.path.basename(os.path.dirname(mem))] = 10 ** 6
+check("свой потолок выше общего не поднимает", mi.budget_for(mem) == mi.BUDGET_CHARS)
+mi.INDEX_BUDGET.clear(); mi.INDEX_BUDGET.update(keep)
+
 # 5в. происхождение: среди новых первым идёт сказанное владельцем; догадка агента — последней
 mem = sandbox()
 
