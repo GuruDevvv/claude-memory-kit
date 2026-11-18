@@ -16,11 +16,16 @@
   переписку и старые не гасит: за несколько дней набегают гигабайты (17.11.2026: 3 набора,
   55 процессов, 7,5 ГБ). Если один и тот же MCP-сервер (та же командная строка) запущен
   у демона несколько раз, самая свежая копия не трогается, более старые выводятся как
-  codex-mcp-copy и с -Kill гасятся вместе с потомками. Сам демон, его shell-команды,
+  codex-mcp-copy и с -KillCodexCopies гасятся вместе с потомками. Сам демон, его shell-команды,
   node_repl и codex-code-mode не трогаются.
 
 .PARAMETER Kill
-  Прибить найденное. Без флага — только показать (режим по умолчанию).
+  Прибить сирот. Без флага — только показать (режим по умолчанию).
+  Копии MCP у демона Codex этот флаг НЕ трогает (решение владельца 18.11.2026):
+  у старой, но открытой переписки после этого пропадают MCP-инструменты.
+
+.PARAMETER KillCodexCopies
+  Закрыть лишние копии MCP у демона Codex. Только после «да» владельца.
 
 .PARAMETER MinAgeHours
   Показывать/убивать только сирот старше N часов. По умолчанию 0 (все).
@@ -36,6 +41,7 @@
 #>
 param(
     [switch]$Kill,
+    [switch]$KillCodexCopies,
     [double]$MinAgeHours = 0,
     [string[]]$AgentNames = @('claude.exe', 'codex.exe'),
     # как узнать демон Codex по командной строке
@@ -152,6 +158,7 @@ $mcpCopies = foreach ($d in $daemons) {
                 Started = $c.CreationDate
                 Cmd     = '{0}: копия {1} из {2}, ~{3:N0} МБ, процессов {4} (демон Codex {5})' -f $kind, ($i + 1), $copies.Count, $mb, $tree.Count, $did
                 Kill    = $tree
+                MB      = $mb
             }
         }
     }
@@ -179,10 +186,15 @@ $suspects |
     Format-Table -AutoSize -Wrap
 
 Write-Output ''
-if ($Kill) {
-    Write-Output ("Найдено: {0}. Убиваю (-Kill)." -f $suspects.Count)
+$copies  = @($suspects | Where-Object { $_.Why -eq 'codex-mcp-copy' })
+$orphans = @($suspects | Where-Object { $_.Why -ne 'codex-mcp-copy' })
+$toKill  = @()
+if ($Kill)            { $toKill += $orphans }
+if ($KillCodexCopies) { $toKill += $copies }
+if ($toKill.Count -gt 0) {
+    Write-Output ("Найдено: {0}. Закрываю: {1}." -f $suspects.Count, $toKill.Count)
     Write-Output ''
-    foreach ($s in $suspects) {
+    foreach ($s in $toKill) {
         $dead = 0
         foreach ($k in $s.Kill) {
             try { Stop-Process -Id $k -Force -ErrorAction Stop; $dead++ } catch { }
@@ -193,6 +205,13 @@ if ($Kill) {
             Write-Output ("  уже завершился {0} ({1})" -f $s.PID, $s.Name)
         }
     }
-} else {
-    Write-Output ("Найдено: {0}. НЕ убито — решает владелец (перезапуск с -Kill)." -f $suspects.Count)
+}
+if (-not $Kill -and $orphans.Count -gt 0) {
+    Write-Output ("Сироты: {0}, НЕ закрыты — перезапуск с -Kill." -f $orphans.Count)
+}
+if (-not $KillCodexCopies -and $copies.Count -gt 0) {
+    $mb = ($copies | Measure-Object -Property MB -Sum).Sum
+    Write-Output ("Лишние копии MCP у Codex: {0}, ~{1:N0} МБ, НЕ закрыты. Закрываются только после «да» владельца:" -f $copies.Count, $mb)
+    Write-Output '  у старой открытой переписки Codex после этого перестанут работать её MCP, пока окно не переоткрыть.'
+    Write-Output '  Закрыть: тот же вызов с -KillCodexCopies (без -Kill, если сирот трогать не надо).'
 }
