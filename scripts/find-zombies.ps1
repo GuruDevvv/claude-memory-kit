@@ -10,6 +10,15 @@
   текущей сессии, не полагаясь на имя процесса (python/node нельзя фильтровать
   по имени — под ними работают и MCP-сервера, и брошенные http.server).
 
+  Отдельный случай — фоновый демон Codex (`codex.exe app-server ... --managed-daemon`).
+  Он жив, поэтому его дети сиротами не считаются, но он поднимает полный набор
+  MCP-серверов (notebooklm, hd_ai, docker gateway, duckduckgo, node_repl) на каждую
+  переписку и старые не гасит: за несколько дней набегают гигабайты (17.11.2026: 3 набора,
+  55 процессов, 7,5 ГБ). Если один и тот же MCP-сервер (та же командная строка) запущен
+  у демона несколько раз, самая свежая копия не трогается, более старые выводятся как
+  codex-mcp-copy и с -Kill гасятся вместе с потомками. Сам демон, его shell-команды,
+  node_repl и codex-code-mode не трогаются.
+
 .PARAMETER Kill
   Прибить найденное. Без флага — только показать (режим по умолчанию).
 
@@ -28,16 +37,40 @@
 param(
     [switch]$Kill,
     [double]$MinAgeHours = 0,
-    [string[]]$AgentNames = @('claude.exe', 'codex.exe')
+    [string[]]$AgentNames = @('claude.exe', 'codex.exe'),
+    # как узнать демон Codex по командной строке
+    [string]$DaemonPattern = 'app-server\b.*--managed-daemon',
+    # какие дети демона считаются MCP-серверами
+    [string]$McpPattern = 'mcp'
 )
 
 $ErrorActionPreference = 'Stop'
 
 # --- 1. Снимок всех процессов -------------------------------------------------
 $all = Get-CimInstance Win32_Process |
-    Select-Object ProcessId, ParentProcessId, Name, CommandLine, CreationDate
+    Select-Object ProcessId, ParentProcessId, Name, CommandLine, CreationDate, PrivatePageCount
 $byPid = @{}
 foreach ($p in $all) { $byPid[[int]$p.ProcessId] = $p }
+
+# дети каждого процесса (ребёнок засчитывается, только если он моложе родителя: PID переиспользуются)
+$kids = @{}
+foreach ($p in $all) {
+    $pp = [int]$p.ParentProcessId
+    $parent = $byPid[$pp]
+    if (-not $parent -or $parent.CreationDate -gt $p.CreationDate) { continue }
+    if (-not $kids.ContainsKey($pp)) { $kids[$pp] = New-Object System.Collections.ArrayList }
+    [void]$kids[$pp].Add($p)
+}
+function Get-Tree {
+    # процесс и все его потомки, потомки раньше родителей (порядок для убийства)
+    param([int]$procId)
+    $out = New-Object System.Collections.ArrayList
+    if ($kids.ContainsKey($procId)) {
+        foreach ($c in $kids[$procId]) { foreach ($x in (Get-Tree ([int]$c.ProcessId))) { [void]$out.Add($x) } }
+    }
+    [void]$out.Add($procId)
+    return $out
+}
 
 # --- 2. Жив ли предок-агент ---------------------------------------------------
 # PID переиспользуются, поэтому родитель засчитывается только если он СТАРШЕ ребёнка.
@@ -73,7 +106,7 @@ $suspects = foreach ($p in $all) {
     $cmd = if ($p.CommandLine) { $p.CommandLine -replace '\s+', ' ' } else { '' }
     $why = $null
     if ($shellTools -contains $p.Name) { $why = 'shell-tool' }
-    elseif ($cmd -match $serverRegex)  { $why = 'dev-server' }
+    elseif ($cmd -match $serverRegex -and $cmd -notmatch '\\Docker\\') { $why = 'dev-server' }
     if (-not $why) { continue }
     if (Test-HasLiveAgentAncestor $p) { continue }   # процесс живой сессии — не трогаем
     $ageH = (New-TimeSpan -Start $p.CreationDate).TotalHours
@@ -85,9 +118,45 @@ $suspects = foreach ($p in $all) {
         Age     = '{0:0.0} ч' -f $ageH
         Started = $p.CreationDate
         Cmd     = if ($cmd.Length -gt 90) { $cmd.Substring(0, 90) + '…' } else { $cmd }
+        Kill    = @([int]$p.ProcessId)
     }
 }
-$suspects = @($suspects | Sort-Object Started)
+
+# --- 4б. Старые наборы MCP у демона Codex --------------------------------------
+$daemons = @($all | Where-Object { $_.CommandLine -and $_.CommandLine -match $DaemonPattern })
+$daemonSets = foreach ($d in $daemons) {
+    $did = [int]$d.ProcessId
+    if (-not $kids.ContainsKey($did)) { continue }
+    # только MCP-серверы: shell-команды и node_repl живой переписки сюда не попадают
+    $servers = @($kids[$did] | Where-Object {
+        $_.CommandLine -and $_.CommandLine -match $McpPattern -and
+        $_.Name -notmatch '^(powershell|pwsh|bash|sh)\.exe$' -and $_.CommandLine -notmatch 'codex-code-mode'
+    })
+    # один и тот же сервер (одна командная строка) запущен несколько раз — старые копии лишние
+    foreach ($g in ($servers | Group-Object { ($_.CommandLine -replace '\s+', ' ').Trim() })) {
+        if ($g.Count -lt 2) { continue }
+        $copies = @($g.Group | Sort-Object CreationDate)
+        for ($i = 0; $i -lt $copies.Count - 1; $i++) {   # самую свежую копию не трогаем
+            $c = $copies[$i]
+            $ageH = (New-TimeSpan -Start $c.CreationDate).TotalHours
+            if ($ageH -lt $MinAgeHours) { continue }
+            $tree = @(Get-Tree ([int]$c.ProcessId))
+            $mb = 0
+            foreach ($x in $tree) { if ($byPid[$x].PrivatePageCount) { $mb += [double]$byPid[$x].PrivatePageCount / 1MB } }
+            $kind = if ($c.CommandLine -match '([\w.-]*mcp[\w.-]*)') { $Matches[1] } else { $c.Name }
+            [PSCustomObject]@{
+                PID     = [int]$c.ProcessId
+                Name    = $c.Name
+                Why     = 'codex-mcp-copy'
+                Age     = '{0:0.0} ч' -f $ageH
+                Started = $c.CreationDate
+                Cmd     = '{0}: копия {1} из {2}, ~{3:N0} МБ, процессов {4} (демон Codex {5})' -f $kind, ($i + 1), $copies.Count, $mb, $tree.Count, $did
+                Kill    = $tree
+            }
+        }
+    }
+}
+$suspects = @(@($suspects) + @($daemonSets) | Where-Object { $_ } | Sort-Object Started)
 
 # --- 5. Вывод -----------------------------------------------------------------
 if ($suspects.Count -eq 0) {
@@ -114,10 +183,13 @@ if ($Kill) {
     Write-Output ("Найдено: {0}. Убиваю (-Kill)." -f $suspects.Count)
     Write-Output ''
     foreach ($s in $suspects) {
-        try {
-            Stop-Process -Id $s.PID -Force -ErrorAction Stop
-            Write-Output ("  убит {0} ({1})" -f $s.PID, $s.Name)
-        } catch {
+        $dead = 0
+        foreach ($k in $s.Kill) {
+            try { Stop-Process -Id $k -Force -ErrorAction Stop; $dead++ } catch { }
+        }
+        if ($dead -gt 0) {
+            Write-Output ("  убит {0} ({1}), процессов: {2}" -f $s.PID, $s.Name, $dead)
+        } else {
             Write-Output ("  уже завершился {0} ({1})" -f $s.PID, $s.Name)
         }
     }
