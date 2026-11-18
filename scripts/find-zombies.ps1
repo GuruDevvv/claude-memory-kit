@@ -12,7 +12,7 @@
 
   Отдельный случай — фоновый демон Codex (`codex.exe app-server ... --managed-daemon`).
   Он жив, поэтому его дети сиротами не считаются, но он поднимает полный набор
-  MCP-серверов (notebooklm, hd_ai, docker gateway, duckduckgo, node_repl) на каждую
+  MCP-серверов (notebooklm, hd_ai, docker gateway, duckduckgo) на каждую
   переписку и старые не гасит: за несколько дней набегают гигабайты (17.11.2026: 3 набора,
   55 процессов, 7,5 ГБ). Если один и тот же MCP-сервер (та же командная строка) запущен
   у демона несколько раз, самая свежая копия не трогается, более старые выводятся как
@@ -106,7 +106,7 @@ $suspects = foreach ($p in $all) {
     $cmd = if ($p.CommandLine) { $p.CommandLine -replace '\s+', ' ' } else { '' }
     $why = $null
     if ($shellTools -contains $p.Name) { $why = 'shell-tool' }
-    elseif ($cmd -match $serverRegex -and $cmd -notmatch '\\Docker\\') { $why = 'dev-server' }
+    elseif ($cmd -match $serverRegex -and $cmd -notmatch 'Program Files\\Docker\\') { $why = 'dev-server' }
     if (-not $why) { continue }
     if (Test-HasLiveAgentAncestor $p) { continue }   # процесс живой сессии — не трогаем
     $ageH = (New-TimeSpan -Start $p.CreationDate).TotalHours
@@ -122,9 +122,9 @@ $suspects = foreach ($p in $all) {
     }
 }
 
-# --- 4б. Старые наборы MCP у демона Codex --------------------------------------
+# --- 4б. Лишние копии MCP-серверов у демона Codex ------------------------------
 $daemons = @($all | Where-Object { $_.CommandLine -and $_.CommandLine -match $DaemonPattern })
-$daemonSets = foreach ($d in $daemons) {
+$mcpCopies = foreach ($d in $daemons) {
     $did = [int]$d.ProcessId
     if (-not $kids.ContainsKey($did)) { continue }
     # только MCP-серверы: shell-команды и node_repl живой переписки сюда не попадают
@@ -156,7 +156,7 @@ $daemonSets = foreach ($d in $daemons) {
         }
     }
 }
-$suspects = @(@($suspects) + @($daemonSets) | Where-Object { $_ } | Sort-Object Started)
+$suspects = @(@($suspects) + @($mcpCopies) | Where-Object { $_ } | Sort-Object Started)
 
 # --- 5. Вывод -----------------------------------------------------------------
 if ($suspects.Count -eq 0) {
